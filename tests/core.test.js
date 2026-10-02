@@ -1,0 +1,13 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { slideBoard, canMove, physicsStep, RADII } from '../core.js';
+test('2048 merges each tile once and scores correctly',()=>{const r=slideBoard([2,2,2,2,...Array(12).fill(0)],'left');assert.deepEqual(r.board.slice(0,4),[4,4,0,0]);assert.equal(r.gained,8);});
+test('2048 skips spaces without chain-merging',()=>{const r=slideBoard([2,0,2,4,...Array(12).fill(0)],'right');assert.deepEqual(r.board.slice(0,4),[0,0,4,4]);assert.equal(r.gained,4);});
+test('2048 vertical movement preserves columns',()=>{let b=Array(16).fill(0);b[0]=4;b[8]=4;const up=slideBoard(b,'up');assert.equal(up.board[0],8);assert.equal(up.gained,8);const down=slideBoard(b,'down');assert.equal(down.board[12],8);});
+test('2048 detects losses and available full-board merges',()=>{const b=[2,4,2,4,4,2,4,2,2,4,2,4,4,2,4,2];assert.equal(canMove(b),false);b[0]=4;assert.equal(canMove(b),true);});
+test('2048 no-op moves do not change the board',()=>{const b=[2,4,8,16,...Array(12).fill(0)];assert.equal(slideBoard(b,'left').changed,false);});
+const ball=(level,x,y)=>({level,r:RADII[level],x,y,vx:0,vy:0,age:2});
+test('matching falling portraits merge into next level',()=>{const b=[ball(0,100,450),ball(0,120,450)];const r=physicsStep(b,1/120);assert.equal(b.length,1);assert.equal(b[0].level,1);assert.equal(r.gained,4);});
+test('different levels resolve collision without merging',()=>{const b=[ball(0,100,450),ball(1,120,450)];const r=physicsStep(b,1/120);assert.equal(b.length,2);assert.equal(r.gained,0);assert.ok(Math.hypot(b[1].x-b[0].x,b[1].y-b[0].y)>=39.9);});
+test('physics keeps falling portraits inside floor and side walls',()=>{const b=[ball(1,0,510)];for(let i=0;i<600;i++)physicsStep(b,1/120);assert.ok(b[0].x>=30);assert.ok(b[0].y<=492-23+.001);assert.ok(Number.isFinite(b[0].vy));});
+test('maximum-level portraits remain stable instead of disappearing',()=>{const b=[ball(7,140,380),ball(7,270,380)];physicsStep(b,1/120);assert.equal(b.length,2);assert.ok(b.every(v=>Number.isFinite(v.x)&&Number.isFinite(v.y)));});
