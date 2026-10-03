@@ -1,7 +1,9 @@
+import { createAimGame } from './aim.js';
 import { slideBoard, canMove, RADII, physicsStep } from './core.js';
 const $ = s => document.querySelector(s);
 const stage = $('#game-stage'), overlay = $('#game-overlay');
 const descriptions = {
+ aim: {title:'头像定位练习',category:'SWEETFROG AIM STUDIO',intro:'稳住准星，快速定位。把大兄弟练成肌肉记忆。',rules:'选择模式、难度和时长，倒数 3 秒后开始。\n点击圆形照片靶，命中后刷新下一个。\n点空会降低命中率并中断连击。',hint:'鼠标点击 / 触屏点按 · Esc 暂停 · 平均用时不包含暂停时间',extra:'剩余时间'},
  tap: {title:'逮住大兄弟',category:'FAST FINGERS CLUB',intro:'30 秒内，从最底下一排开始点头像。',rules:'只点最底下一排的头像。\n点对得 1 分，点错扣 2 秒。\n手速有多快，友情就有多深。',hint:'点击最底下一排的头像 · 键盘 D / F / J / K 对应四列',extra:'剩余时间'},
  merge: {title:'合成大兄弟',category:'BIG FRIEND ENERGY',intro:'相同头像碰撞升级，合出终极大兄弟。',rules:'左右移动选择落点，点击放下头像。\n相同等级碰到一起就会合成。\n堆过虚线太久，本局就结束啦。',hint:'移动选择落点，点击 / 松手投放 · 键盘 ← → 移动，空格投放',extra:'下一颗'},
  flap: {title:'朋友起飞',category:'FLY, MY FRIEND',intro:'轻轻一点，让大兄弟飞过每一道水管。',rules:'点击画面或按空格向上飞。\n每穿过一组水管得 1 分。\n碰到水管、天空或地面都会结束。',hint:'点击画面 / 按空格起飞 · 保持节奏，稳住别慌',extra:'状态'},
@@ -29,13 +31,25 @@ function tileCanvas(index) { const canvas = document.createElement('canvas'); ca
 function makeCanvas() { const canvas = document.createElement('canvas'); canvas.width=840; canvas.height=1020; canvas.setAttribute('aria-label',descriptions[active].title+'游戏画面'); stage.replaceChildren(canvas); const ctx=canvas.getContext('2d'); ctx.scale(2,2); return {canvas,ctx}; }
 function drawFace(ctx, level, x, y, r) { ctx.fillStyle=colors[level%colors.length];ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();face(ctx,level,x-r+3,y-r+3,(r-3)*2);ctx.strokeStyle=colors[level%colors.length];ctx.lineWidth=3;ctx.beginPath();ctx.arc(x,y,r-1,0,Math.PI*2);ctx.stroke(); }
 function showOverlay(title,text,label,callback) { $('#overlay-title').textContent=title;$('#overlay-text').textContent=text;$('#start-button').textContent=label;$('#start-button').onclick=callback;overlay.hidden=false; }
-function finish(title, text) { if (!running) return;running=false;cancelAnimationFrame(raf);beep(180,.2);extra(active==='tap'?'0 秒':'结束');updateRecords();showOverlay(title,text+`\n本局 ${score} 分 · 最佳 ${records[active]} 分`,'不服，再来一局 ↻',start); }
+function finish(title, text) { if (!running) return;running=false;cancelAnimationFrame(raf);beep(180,.2);extra(active==='tap'||active==='aim'?'0 秒':'结束');updateRecords();showOverlay(title,text+`\n本局 ${score} 分 · 最佳 ${records[active]} 分`,'不服，再来一局 ↻',start); }
 function cleanup() { running=false;paused=false;cancelAnimationFrame(raf);session?.destroy?.();session=null;stage.replaceChildren(); }
-async function openGame(key) { if (!descriptions[key]) return;cleanup();active=key;$('#lobby').hidden=true;$('#game-screen').hidden=false;const d=descriptions[key];$('#game-title').textContent=d.title;$('#game-description').textContent=d.intro;$('#game-category').textContent=d.category;$('#game-hint').textContent=d.hint;$('#extra-label').textContent=d.extra;$('#direction-pad').hidden=key!=='puzzle';stage.style.aspectRatio=key==='puzzle'?'1':'420/510';setScore(0);extra('准备');showOverlay('准备好了吗？',d.rules,'素材加载中…',null);$('#start-button').disabled=true;window.scrollTo(0,0);await ready;if(active!==key)return;$('#start-button').disabled=false;showOverlay('准备好了吗？',d.rules,'开始游戏 →',start); }
+async function openGame(key) {
+ if (!descriptions[key]) return;
+ cleanup(); active=key;
+ $('#game-screen').classList.toggle('aim-screen',key==='aim');
+ $('#aim-options').hidden=key!=='aim'; $('#aim-stats').hidden=key!=='aim';
+ $('.scoreboard > div:nth-child(2) > span').textContent=key==='aim'?'综合最佳':'历史最佳';
+ $('#lobby').hidden=true; $('#game-screen').hidden=false;
+ const d=descriptions[key]; $('#game-title').textContent=d.title; $('#game-description').textContent=d.intro; $('#game-category').textContent=d.category; $('#game-hint').textContent=d.hint; $('#extra-label').textContent=d.extra; $('#direction-pad').hidden=key!=='puzzle';
+ stage.style.aspectRatio=key==='aim'?'':key==='puzzle'?'1':'420/510';
+ if(key==='aim')for(const id of ['#aim-accuracy','#aim-reaction','#aim-combo','#aim-hits'])$(id).textContent='—';
+ setScore(0);extra('准备');showOverlay('准备好了吗？',d.rules,'素材加载中…',null);$('#start-button').disabled=true;window.scrollTo(0,0);
+ await ready;if(active!==key)return;$('#start-button').disabled=false;showOverlay('准备好了吗？',d.rules,'开始游戏 →',start);
+}
 function lobby() { cleanup();active=null;$('#lobby').hidden=false;$('#game-screen').hidden=true;updateRecords(); }
 function route() {const key=location.hash.slice(1);if(descriptions[key])openGame(key);else lobby();}
 window.addEventListener('hashchange',route);document.querySelectorAll('[data-game]').forEach(b=>b.onclick=()=>{location.hash=b.dataset.game;});$('#back-button').onclick=()=>{location.hash='games';};$('#restart-button').onclick=()=>{if(active)openGame(active);};
-function start() { cleanup();setScore(0);overlay.hidden=true;running=true;paused=false;session=({tap:createTap,merge:createMerge,flap:createFlap,puzzle:createPuzzle})[active]();lastTime=performance.now();raf=requestAnimationFrame(tick);beep(); }
+function start() { cleanup();setScore(0);overlay.hidden=true;running=true;paused=false;session=({tap:createTap,merge:createMerge,flap:createFlap,puzzle:createPuzzle,aim:()=>createAimGame({stage,tileCanvas,canPlay:()=>running&&!paused,setScore,extra,beep,finish})})[active]();lastTime=performance.now();raf=requestAnimationFrame(tick);beep(); }
 function tick(now) {if(!running||paused)return;const dt=Math.min((now-lastTime)/1000,.05);lastTime=now;session?.update?.(dt);session?.draw?.();if(running&&!paused)raf=requestAnimationFrame(tick);}
 function pause() { if(!running||paused)return;paused=true;cancelAnimationFrame(raf);showOverlay('休息一下，友情不掉线', '游戏已暂停，回来后继续。','继续游戏 →',()=>{paused=false;overlay.hidden=true;lastTime=performance.now();raf=requestAnimationFrame(tick);}); }
 document.addEventListener('visibilitychange',()=>{if(document.hidden)pause();});window.addEventListener('blur',pause);
@@ -73,4 +87,3 @@ function createMerge() {
  return {draw,key(e){if(e.key==='ArrowLeft')aim=Math.max(RADII[next]+8,aim-18);if(e.key==='ArrowRight')aim=Math.min(412-RADII[next],aim+18);if(e.code==='Space'&&!e.repeat)drop();},update(dt){cooldown=Math.max(0,cooldown-dt);acc+=dt;while(acc>=1/120){const r=physicsStep(balls,1/120);acc-=1/120;if(r.gained){setScore(score+r.gained);beep(500+r.largest*75,.08);if(r.largest>maxLevel){maxLevel=r.largest;if(maxLevel===7)toast('终极大兄弟合成成功！');}}}const overflowing=balls.some(b=>b.age>1.8&&b.y-b.r<96&&Math.abs(b.vy)<45);danger=overflowing?danger+dt:Math.max(0,danger-dt*2);if(danger>=2)finish('大兄弟太多，装不下啦','合成到第 '+(maxLevel+1)+' 级！这份友情有点沉。');}};
 }
 route();
-
