@@ -31,7 +31,7 @@ function tileCanvas(index) { const canvas = document.createElement('canvas'); ca
 function makeCanvas() { const canvas = document.createElement('canvas'); canvas.width=840; canvas.height=1020; canvas.setAttribute('aria-label',descriptions[active].title+'游戏画面'); stage.replaceChildren(canvas); const ctx=canvas.getContext('2d'); ctx.scale(2,2); return {canvas,ctx}; }
 function drawFace(ctx, level, x, y, r) { ctx.fillStyle=colors[level%colors.length];ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();face(ctx,level,x-r+3,y-r+3,(r-3)*2);ctx.strokeStyle=colors[level%colors.length];ctx.lineWidth=3;ctx.beginPath();ctx.arc(x,y,r-1,0,Math.PI*2);ctx.stroke(); }
 function showOverlay(title,text,label,callback) { $('#overlay-title').textContent=title;$('#overlay-text').textContent=text;$('#start-button').textContent=label;$('#start-button').onclick=callback;overlay.hidden=false; }
-function finish(title, text) { if (!running) return;running=false;cancelAnimationFrame(raf);beep(180,.2);extra(active==='tap'||active==='aim'?'0 秒':'结束');updateRecords();showOverlay(title,text+`\n本局 ${score} 分 · 最佳 ${records[active]} 分`,'不服，再来一局 ↻',start); }
+function finish(title, text) { if (!running) return;running=false;cancelAnimationFrame(raf);beep(180,.2);extra(active==='tap'||active==='aim'?'0 秒':'结束');updateRecords();window.dispatchEvent(new CustomEvent('sweetfrog:finished',{detail:{game:active,score}}));showOverlay(title,text+`\n本局 ${score} 分 · 最佳 ${records[active]} 分`,'不服，再来一局 ↻',start); }
 function cleanup() { running=false;paused=false;cancelAnimationFrame(raf);session?.destroy?.();session=null;stage.replaceChildren(); }
 async function openGame(key) {
  if (!descriptions[key]) return;

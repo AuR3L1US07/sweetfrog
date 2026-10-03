@@ -2,6 +2,18 @@
 
 五款原创实现的浏览器小游戏：逮住大青蛙、合成大青蛙、青蛙起飞、青蛙2048、青蛙定位练习。
 
+## 留言与排行榜云端配置
+
+网站使用 Firebase Authentication 的游客身份和 Cloud Firestore 保存公开留言、回复及五款游戏的最高分。仓库中的 `firebase-config.js` 初始为空；配置前社区界面会显示未连接状态，游戏照常运行。
+
+1. 在 [Firebase 控制台](https://console.firebase.google.com/) 新建项目并注册 Web 应用，复制 Web 应用配置中的 `apiKey`、`authDomain`、`projectId`、`appId` 到 `firebase-config.js`。
+2. 在 Authentication → Sign-in method 启用 **Anonymous**。
+3. 创建 Cloud Firestore 数据库，将 `firestore.rules` 内容发布到 Firestore 的 Rules 页面。
+4. 在 Authentication → Settings → Authorized domains 中确认 `aur3l1us07.github.io` 已获授权。
+5. 在 GitHub Pages 上打开网站，测试游客留言、回复、五个排行榜以及自己的名次。
+
+昵称只用于展示。游客身份保存在浏览器中，清除浏览器数据或更换设备会成为新玩家。排行榜按每人每款游戏最高分计，分数相同显示并列名次。由于游戏在浏览器本地运行，客户端成绩无法防止有意伪造；这是朋友间娱乐排行，不适合有奖竞赛。公开留言可在 Firestore 控制台中管理。
+
 ## 使用
 
 使用静态服务器打开项目，例如 `python -m http.server 4173`，访问 `http://localhost:4173`。GitHub Pages 从 `main` 分支根目录自动发布。

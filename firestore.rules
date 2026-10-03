@@ -1,0 +1,46 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function validName(name) { return name is string && name.size() >= 1 && name.size() <= 20; }
+    function validText(body) { return body is string && body.size() >= 1 && body.size() <= 500; }
+    function validGame(game) { return game in ['tap', 'merge', 'flap', 'puzzle', 'aim']; }
+
+    match /leaderboards/{game}/players/{uid} {
+      allow read: if validGame(game);
+      allow create: if signedIn() && validGame(game) && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['name', 'score', 'updatedAt'])
+        && validName(request.resource.data.name)
+        && request.resource.data.score is int && request.resource.data.score >= 0 && request.resource.data.score <= 10000000
+        && request.resource.data.updatedAt == request.time;
+      allow update: if signedIn() && validGame(game) && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['name', 'score', 'updatedAt'])
+        && validName(request.resource.data.name)
+        && request.resource.data.score is int && request.resource.data.score >= resource.data.score
+        && request.resource.data.score <= 10000000
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    match /threads/{threadId} {
+      allow read: if true;
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['uid', 'name', 'body', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && validName(request.resource.data.name) && validText(request.resource.data.body)
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+
+      match /replies/{replyId} {
+        allow read: if true;
+        allow create: if signedIn()
+          && exists(/databases/$(database)/documents/threads/$(threadId))
+          && request.resource.data.keys().hasOnly(['uid', 'name', 'body', 'createdAt'])
+          && request.resource.data.uid == request.auth.uid
+          && validName(request.resource.data.name) && validText(request.resource.data.body)
+          && request.resource.data.createdAt == request.time;
+        allow update, delete: if false;
+      }
+    }
+  }
+}
