@@ -100,14 +100,23 @@ try {
     if(game==='merge')await hostPage.locator('#game-stage canvas').click();
     if(game==='flap')await hostPage.locator('#game-stage canvas').click();
     if(game==='puzzle')for(let step=0;step<24&&Number(await hostPage.locator('#score').textContent())===0;step++)await hostPage.keyboard.press(['ArrowLeft','ArrowDown','ArrowRight','ArrowUp'][step%4]);
-    if(game==='aim')await hostPage.locator('.aim-target').click();
+    if(game==='aim'){
+      await hostPage.route('**/api/pk/rooms/*/score',async route=>{await new Promise(resolve=>setTimeout(resolve,450));await route.continue();});
+      for(let hit=0;hit<12;hit++)await hostPage.locator('.aim-target').click();
+    }
     if(['puzzle','aim'].includes(game)){
       await hostPage.waitForFunction(()=>Number(document.querySelector('#score').textContent)>0);
       await guestPage.waitForFunction(()=>Number(document.querySelector('.pk-player-score').textContent)>0,{timeout:5000});
     }
+    await hostPage.waitForFunction(()=>document.querySelector('.pk-player.is-self .pk-player-score')?.textContent===document.querySelector('#score')?.textContent,{timeout:8000});
+    const expectedScore=await hostPage.locator('#score').textContent();
+    execFileSync(process.execPath,[cli,'d1','execute','sweetfrog-db','--local','--persist-to',state,'--command',`UPDATE pk_rooms SET starts_at=${Date.now()-33000} WHERE code='${selectedCode}'`],{cwd:root,stdio:'pipe'});
+    await hostPage.locator('#pk-result').waitFor({state:'visible',timeout:10000});
+    await guestPage.locator('#pk-result').waitFor({state:'visible',timeout:10000});
+    assert.match(await hostPage.locator('.pk-result-copy').textContent(),new RegExp(`你 ${expectedScore} 分，对方 0 分`),`${game} must settle using the live score`);
   }
   assert.deepEqual(errors,[]);
-  console.log('PASS: two browsers create/join, all five games, rematch consent, result animation state, auto focus, live score, mobile layout');
+  console.log('PASS: two browsers create/join, all five games, rematch consent, final scores, result animation state, auto focus, mobile layout');
 } finally {
   await browser?.close();
   if(server){const stopped=new Promise(resolve=>server.once('exit',resolve));server.kill();await stopped;}

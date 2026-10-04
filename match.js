@@ -9,7 +9,7 @@ const content=page.querySelector('#match-content');
 const make=(tag,className,text)=>{const node=document.createElement(tag);node.className=className;if(text!==undefined)node.textContent=text;return node;};
 const token=()=>{try{return localStorage.getItem('sweetfrog-session')||'';}catch{return '';}};
 let visitorId;try{visitorId=localStorage.getItem('sweetfrog-visitor-id');if(!/^[a-f0-9]{32}$/.test(visitorId||'')){visitorId=Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,'0')).join('');localStorage.setItem('sweetfrog-visitor-id',visitorId);}}catch{visitorId=Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,'0')).join('');}
-let selected='tap',user=null,queue=null,queueTimer=0,countsTimer=0,successTimer=0,routeId=0,requesting=false,latestCounts=null;
+let selected='tap',user=null,queue=null,queueTimer=0,countsTimer=0,successTimer=0,routeId=0,queueVersion=0,requesting=false,latestCounts=null,shownRoom='';
 async function api(path,options={}){
   const response=await fetch('/api/'+path,{method:options.method||'GET',headers:{'Content-Type':'application/json',...(token()?{Authorization:`Bearer ${token()}`}:{})},body:options.body===undefined?undefined:JSON.stringify(options.body)});
   const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(data.error||'连接失败，请稍后重试');return data;
@@ -48,10 +48,13 @@ function showIdle(){
   content.querySelector('#match-searching').hidden=true;content.querySelector('#match-modes').hidden=false;content.querySelector('#match-start').hidden=!user;
   page.querySelector('#match-found').hidden=true;choose(selected);
 }
-async function handleQueue(next){
+async function handleQueue(next,id=routeId,version=queueVersion){
+  if(id!==routeId||version!==queueVersion||page.hidden)return;
+  if(next?.status==='matched'&&next.roomCode===shownRoom)return;
   queue=next;
   if(!next){clearInterval(queueTimer);queueTimer=0;showIdle();setMessage('匹配已结束，可以重新开始。');return;}
   if(next.status==='matched'&&next.roomCode){
+    shownRoom=next.roomCode;
     clearInterval(queueTimer);queueTimer=0;
     const found=page.querySelector('#match-found');found.hidden=false;content.querySelector('#match-searching').hidden=true;content.querySelector('#match-modes').hidden=true;content.querySelector('#match-start').hidden=true;
     found.querySelector('.match-found-game').textContent=names[next.game];
@@ -74,20 +77,20 @@ async function handleQueue(next){
 }
 let polling=false;
 async function pollQueue(){
-  if(polling||page.hidden||!queue||queue.status==='matched')return;polling=true;
-  try{const data=await api('match/queue');await handleQueue(data.queue);setMessage('');}
+  if(polling||page.hidden||!queue||queue.status==='matched')return;polling=true;const id=routeId,version=queueVersion;
+  try{const data=await api('match/queue');if(id!==routeId||version!==queueVersion)return;await handleQueue(data.queue,id,version);if(data.queue)setMessage('');}
   catch(error){setMessage(error.message);}
   finally{polling=false;}
 }
 async function start(){
-  if(!user||requesting||queue)return;requesting=true;const button=content.querySelector('#match-start');button.disabled=true;setMessage('正在加入匹配…');
-  try{await handleQueue((await api('match/queue',{method:'POST',body:{game:selected}})).queue);setMessage('');}
+  if(!user||requesting||queue)return;requesting=true;const id=routeId,version=++queueVersion;const button=content.querySelector('#match-start');button.disabled=true;setMessage('正在加入匹配…');
+  try{await handleQueue((await api('match/queue',{method:'POST',body:{game:selected}})).queue,id,version);if(id===routeId&&version===queueVersion)setMessage('');}
   catch(error){setMessage(error.message);}finally{requesting=false;button.disabled=false;}
 }
 async function cancel(){
-  if(!queue||requesting)return;requesting=true;
-  try{await api('match/queue',{method:'DELETE'});clearInterval(queueTimer);queueTimer=0;queue=null;showIdle();setMessage('已取消匹配。');}
-  catch(error){setMessage(error.message);}
+  if(!queue||requesting)return;requesting=true;const id=routeId,version=++queueVersion;
+  try{await api('match/queue',{method:'DELETE'});if(id!==routeId||version!==queueVersion)return;clearInterval(queueTimer);queueTimer=0;queue=null;shownRoom='';showIdle();setMessage('已取消匹配。');}
+  catch(error){if(id===routeId&&version===queueVersion){setMessage(error.message);try{await handleQueue((await api('match/queue')).queue,id,version);}catch{}}}
   finally{requesting=false;}
 }
 function render(){
@@ -112,11 +115,11 @@ function render(){
   choose(selected);if(latestCounts)updateCounts(latestCounts);
 }
 async function route(){
-  const active=location.hash==='#match',id=++routeId;
+  const active=location.hash==='#match',id=++routeId;++queueVersion;
   if(!active){
     clearInterval(queueTimer);clearInterval(countsTimer);clearTimeout(successTimer);queueTimer=countsTimer=0;
     if(queue&&queue.status!=='matching')api('match/queue',{method:'DELETE',body:{ack:true}}).catch(()=>{});
-    queue=null;page.hidden=true;nav.classList.remove('active');presence();return;
+    queue=null;shownRoom='';page.hidden=true;nav.classList.remove('active');presence();return;
   }
   page.hidden=false;nav.classList.add('active');document.querySelector('#lobby').hidden=true;document.querySelector('#game-screen').hidden=true;document.querySelector('#club-page').hidden=true;
   content.replaceChildren(make('p','club-notice','正在打开匹配大厅…'));

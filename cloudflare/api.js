@@ -133,6 +133,9 @@ export async function handleApi(request, env) {
       requireUser();const now=Date.now();
       if(method==='POST'){
         const game=(await body(request)).game;if(!matchGames.includes(game))fail(400,'请选择对战游戏');await rate(`match-join:${user.id}`,30);
+        const existing=await queueState();
+        if(existing?.status==='matched'||existing?.status==='matching')return json({queue:existing});
+        if(existing?.status==='waiting'&&existing.game===game)return json({queue:await findMatch()});
         await run('DELETE FROM match_queue WHERE last_seen<?',now-86400000);
         await run('INSERT INTO match_queue(user_id,game,status,joined_at,last_seen,room_code) VALUES(?,?,\'waiting\',?,?,NULL) ON CONFLICT(user_id) DO UPDATE SET game=excluded.game,status=\'waiting\',joined_at=excluded.joined_at,last_seen=excluded.last_seen,room_code=NULL',user.id,game,now,now);
         return json({queue:await findMatch()});

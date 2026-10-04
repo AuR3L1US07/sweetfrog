@@ -20,12 +20,13 @@ const make = (tag, className, text) => { const node = document.createElement(tag
 let me = null, room = null, localScore = null, pendingHits = 0, hitBuffer = [], hitSending = false, hitTimer = 0, finalSyncedRound = 0;
 let routeId = 0, pollTimer = 0, tickTimer = 0, polling = false, clockOffset = 0;
 let viewCode = '', errorMessage = '';
-let pkLaunched=false,pkResultShown=false,scoreSeq=0,latestScore=null,scoreTimer=0,scoreQueue=Promise.resolve(),pendingScores=0;
+let pkLaunched=false,pkResultShown=false,scoreSeq=0,latestScore=null,scoreTimer=0,scoreSending=false,pendingScores=0;
 let resultAnnouncedRound=0,focusedRound=0,rematchBusy=false;
 const token = () => { try { return localStorage.getItem('sweetfrog-session') || ''; } catch { return ''; } };
 const now = () => Date.now() - clockOffset;
 
 async function api(path, options={}) {
+  const sentAt=Date.now();
   const response = await fetch('/api/pk/rooms' + path, {
     method:options.method || 'GET',
     headers:{'Content-Type':'application/json',...(token()?{Authorization:`Bearer ${token()}`}:{})},
@@ -33,6 +34,7 @@ async function api(path, options={}) {
   });
   const data = await response.json().catch(() => ({}));
   if(!response.ok) throw Error(data.error || '连接失败，请稍后重试');
+  if(data.room?.serverNow)clockOffset=Math.round((sentAt+Date.now())/2-data.room.serverNow);
   return data;
 }
 
@@ -73,7 +75,7 @@ function playerCard(label) {
   card.append(avatar,copy,make('strong','pk-player-score','0'));return card;
 }
 function mountRoom(code) {
-  content.replaceChildren();viewCode=code;localScore=null;pendingHits=0;hitBuffer=[];hitSending=false;finalSyncedRound=0;pkLaunched=false;pkResultShown=false;scoreSeq=0;latestScore=null;scoreQueue=Promise.resolve();pendingScores=0;resultAnnouncedRound=0;focusedRound=0;rematchBusy=false;
+  content.replaceChildren();viewCode=code;localScore=null;pendingHits=0;hitBuffer=[];hitSending=false;finalSyncedRound=0;pkLaunched=false;pkResultShown=false;scoreSeq=0;latestScore=null;scoreSending=false;pendingScores=0;resultAnnouncedRound=0;focusedRound=0;rematchBusy=false;
   const head=make('div','club-heading');head.innerHTML='<span class="eyebrow">LIVE FRIEND MATCH</span><h1 id="pk-game-title">好友 PK</h1><p id="pk-game-description">正在读取房间选择的游戏…</p>';
   const back=make('a','forum-back','← 返回好友 PK');back.href='#pk';
   const roomCard=make('section','pk-room-card');
@@ -112,17 +114,18 @@ function renderResult(){
   const result=content.querySelector('#pk-result');if(!result||!room)return;
   const own=me?.id===room.host.id?room.host:room.guest,other=own===room.host?room.guest:room.host;
   const outcome=room.host.score===room.guest.score?'draw':room.winnerId===me?.id?'win':'lose';
-  if(resultAnnouncedRound!==room.round){
-    resultAnnouncedRound=room.round;result.classList.remove('is-win','is-lose','is-draw');result.classList.add('is-'+outcome);
+  const resultKey=`${room.round}:${room.host.score}:${room.guest.score}`;
+  if(resultAnnouncedRound!==resultKey){
+    const firstResult=!resultAnnouncedRound||!String(resultAnnouncedRound).startsWith(`${room.round}:`);
+    resultAnnouncedRound=resultKey;result.classList.remove('is-win','is-lose','is-draw');result.classList.add('is-'+outcome);
     result.querySelector('.pk-result-icon').innerHTML=iconSvg(outcome==='win'?'trophy':outcome==='lose'?'retry':'match');
     result.querySelector('.pk-result-title').textContent=outcome==='win'?'胜利！这局你赢了':outcome==='lose'?'惜败！下一局扳回来':'平局！再比一场';
     result.querySelector('.pk-result-copy').textContent=`第 ${room.round} 局 · 你 ${own.score} 分，对方 ${other.score} 分`;
-    window.dispatchEvent(new CustomEvent('sweetfrog:pk-result',{detail:{outcome}}));
-    requestAnimationFrame(()=>result.scrollIntoView({block:'center',behavior:'instant'}));
+    if(firstResult){window.dispatchEvent(new CustomEvent('sweetfrog:pk-result',{detail:{outcome}}));requestAnimationFrame(()=>result.scrollIntoView({block:'center',behavior:'instant'}));}
   }
   result.hidden=false;
   const note=result.querySelector('.pk-rematch-note'),request=result.querySelector('.pk-rematch'),accept=result.querySelector('.pk-rematch-accept'),cancel=result.querySelector('.pk-quiet-button');
-  const ready=now()>=room.endsAt+(room.game==='tap'?1200:1400)&&!pendingHits&&!pendingScores&&!scoreTimer&&(room.game!=='tap'||finalSyncedRound===room.round);
+  const ready=now()>=room.endsAt+1200&&!pendingHits&&!pendingScores&&!scoreTimer&&latestScore===null&&finalSyncedRound===room.round;
   request.hidden=!ready||Boolean(room.rematchBy);accept.hidden=!ready||!room.rematchBy||room.rematchBy===me?.id;cancel.hidden=!ready||room.rematchBy!==me?.id;
   note.textContent=!ready?'正在核对最后的成绩…':room.rematchBy===me?.id?'已发出邀约，等对方同意就开下一局。':room.rematchBy?'对方想再来一局，同意后将自动倒计时。':'还想比一场？发起邀约，等朋友点头。';
   for(const button of [request,accept,cancel])button.disabled=rematchBusy;
@@ -148,12 +151,19 @@ function phaseFor(roomState) {
   if(!roomState.startsAt)return roomState.guest?'ready':'waiting';
   const time=now();return time<roomState.startsAt?'countdown':time<roomState.endsAt?'playing':'finished';
 }
-function flushScore(){
+async function flushScore(){
   clearTimeout(scoreTimer);scoreTimer=0;
-  if(!room||room.game==='tap'||latestScore===null||!viewCode)return;
+  if(!room||room.game==='tap'||latestScore===null||!viewCode||scoreSending)return;
   const code=viewCode,value=latestScore,seq=++scoreSeq,round=room.round;
-  latestScore=null;pendingScores++;
-  scoreQueue=scoreQueue.then(async()=>{try{const data=await api('/'+code+'/score',{method:'POST',body:{score:value,seq,round}});applyRoom(data.room);}catch(error){if(room?.round===round)alertText(error.message);}finally{if(room?.round===round)pendingScores--;if(pendingScores===0)await poll();}});
+  latestScore=null;scoreSending=true;pendingScores=1;
+  try{const data=await api('/'+code+'/score',{method:'POST',body:{score:value,seq,round}});applyRoom(data.room);}
+  catch(error){if(room?.round===round&&viewCode===code)alertText(error.message);}
+  finally{
+    if(room?.round!==round||viewCode!==code)return;
+    scoreSending=false;pendingScores=0;
+    if(latestScore!==null)flushScore();
+    else if(phaseFor(room)==='finished')poll();
+  }
 }
 function scheduleHits(){if(!hitTimer&&!hitSending&&hitBuffer.length)hitTimer=setTimeout(flushHits,65);}
 async function flushHits(){
@@ -187,7 +197,7 @@ function tick() {
   else if(phase==='ready')status.textContent=own?.ready?'已准备，等待朋友点击准备。':'朋友已加入，点“准备好了”即可开局。';
   else if(phase==='countdown')status.textContent=`准备开局 · ${Math.max(1,Math.ceil((room.startsAt-now())/1000))}`;
   else if(phase==='playing')status.textContent=`${games[room.game]} PK 进行中 · 稳住节奏！`;
-  else if(pendingHits||pendingScores||scoreTimer||now()<room.endsAt+(room.game==='tap'?1200:1400)||room.game==='tap'&&finalSyncedRound!==room.round)status.textContent='时间到，正在核对最后的成绩…';
+  else if(pendingHits||pendingScores||scoreTimer||latestScore!==null||now()<room.endsAt+1200||finalSyncedRound!==room.round)status.textContent='时间到，正在核对最后的成绩…';
   else status.textContent=room.host.score===room.guest.score?'平局！':room.winnerId===me?.id?'你赢了！':'这局朋友赢了！';
   game.hidden=phase!=='playing'||room.game!=='tap';
   const timer=content.querySelector('.pk-timer');if(timer)timer.textContent=`${Math.max(0,(room.endsAt-now())/1000).toFixed(1)} 秒`;
@@ -203,8 +213,10 @@ function tick() {
       if(room?.round===round&&phaseFor(room)==='playing')requestAnimationFrame(()=>document.querySelector('#stage-wrap').scrollIntoView({block:'center',behavior:'instant'}));
     });
   }
-  if(phase==='finished'&&room.game!=='tap'&&pkLaunched&&!pkResultShown&&!pendingScores&&!scoreTimer){pkResultShown=true;stopPkGame();page.hidden=false;document.querySelector('#lobby').hidden=true;}
-  if(phase==='finished'&&!pendingHits&&!pendingScores&&!scoreTimer&&now()>=room.endsAt+(room.game==='tap'?1200:1400)&&(room.game!=='tap'||finalSyncedRound===room.round))renderResult();
+  if(phase==='finished'&&room.game!=='tap'&&pkLaunched&&!pkResultShown){pkResultShown=true;stopPkGame();page.hidden=false;document.querySelector('#lobby').hidden=true;}
+  if(phase==='finished'&&room.game!=='tap'&&latestScore!==null&&!scoreSending&&!scoreTimer)flushScore();
+  if(phase==='finished'&&finalSyncedRound!==room.round&&now()>=room.endsAt+1200&&!pendingHits&&!pendingScores&&latestScore===null&&!scoreTimer&&!polling)poll();
+  if(phase==='finished'&&!pendingHits&&!pendingScores&&latestScore===null&&!scoreTimer&&now()>=room.endsAt+1200&&finalSyncedRound===room.round)renderResult();
 }
 function applyRoom(next) {
   if(viewCode!==next.code)return;
@@ -212,11 +224,10 @@ function applyRoom(next) {
   if(room&&next.round>room.round){
     stopPkGame();page.hidden=false;document.querySelector('#game-screen').hidden=true;
     content.querySelector('#pk-result').hidden=true;
-    localScore=null;pendingHits=0;hitBuffer=[];hitSending=false;clearTimeout(hitTimer);hitTimer=0;finalSyncedRound=0;pkLaunched=false;pkResultShown=false;scoreSeq=0;latestScore=null;clearTimeout(scoreTimer);scoreTimer=0;pendingScores=0;scoreQueue=Promise.resolve();focusedRound=0;resultAnnouncedRound=0;
+    localScore=null;pendingHits=0;hitBuffer=[];hitSending=false;clearTimeout(hitTimer);hitTimer=0;finalSyncedRound=0;pkLaunched=false;pkResultShown=false;scoreSeq=0;latestScore=null;clearTimeout(scoreTimer);scoreTimer=0;scoreSending=false;pendingScores=0;focusedRound=0;resultAnnouncedRound=0;
     content.querySelector('#pk-board').replaceChildren();
     requestAnimationFrame(()=>content.querySelector('.pk-room-card').scrollIntoView({block:'center',behavior:'instant'}));
   }
-  clockOffset=Date.now()-next.serverNow;
   room=next;
   content.querySelector('#pk-game-title').textContent=games[room.game]+' · PK';
   content.querySelector('#pk-game-description').textContent=room.game==='tap'?'双方同题，30 秒比手速。只点最底下一排的头像。':'两人同时玩「'+games[room.game]+'」，30 秒内分数更高的一方获胜。';
@@ -238,7 +249,7 @@ function applyRoom(next) {
 }
 async function poll() {
   if(polling||!viewCode||!location.hash.toLowerCase().startsWith('#pk/'))return;polling=true;
-  try{const data=await api('/'+viewCode);applyRoom(data.room);if(room?.game==='tap'&&data.room.round===room.round&&data.room.endsAt&&data.room.serverNow>=data.room.endsAt+1200){finalSyncedRound=room.round;tick();}alertText('');}
+  try{const data=await api('/'+viewCode);applyRoom(data.room);if(room&&data.room.round===room.round&&data.room.endsAt&&data.room.serverNow>=data.room.endsAt+1200&&!pendingHits&&!pendingScores&&latestScore===null){finalSyncedRound=room.round;tick();}alertText('');}
   catch(error){alertText(error.message);}
   finally{polling=false;}
 }

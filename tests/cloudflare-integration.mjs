@@ -79,6 +79,7 @@ try {
   assert.equal((await call('/api/match/queue','DELETE',undefined,admin.token))[0],200);
   const found=(await call('/api/match/queue','POST',{game:'tap'},admin.token))[1].queue;
   assert.equal(found.status,'matched');assert.match(found.roomCode,/^[A-HJ-NP-Z2-9]{6}$/);
+  assert.equal((await call('/api/match/queue','POST',{game:'aim'},admin.token))[1].queue.roomCode,found.roomCode,'rejoining must preserve an already matched room');
   assert.equal((await call('/api/match/queue','GET',undefined,token))[1].queue.roomCode,found.roomCode);
   const matchedRoom=(await call(`/api/pk/rooms/${found.roomCode}`,'GET',undefined,token))[1].room;
   assert.equal(matchedRoom.game,'tap');assert.equal(matchedRoom.phase,'countdown');
