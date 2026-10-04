@@ -66,3 +66,7 @@ Cloudflare 集成测试使用临时本地 D1，不连接正式数据库。覆盖
 - 本地 Node 版使用 scrypt，Cloudflare 版使用带随机盐的 Web Crypto PBKDF2；本地测试账号不会自动迁移到云端。首次上线请注册新账号。
 - 认证按 IP 每小时最多 8 次，社区发言按账号每小时最多 20 次；不能保证同一真人只注册一个账号。
 - GitHub Pages 的旧地址不会自动切换，新站验收后再决定旧地址跳转。
+
+## 已有数据库升级头像功能
+
+首次部署头像功能时，先对现有 D1 数据库执行 cloudflare/avatar-migration.sql，再部署新版代码。新建数据库直接使用 cloudflare/schema.sql。玩家头像存入 users.avatar_data，旧账号为空值时使用默认青蛙头像。

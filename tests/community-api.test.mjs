@@ -32,6 +32,15 @@ test('registration, guest permissions, unique votes, replies and rankings', asyn
     const [code, registered] = await call('/api/register', 'POST', { username:'testfrog', password:'password123' });
     assert.equal(code, 200);
     const token = registered.token;
+    const avatarUrl=`/api/avatars/${registered.user.id}`;
+    assert.match((await (await fetch(origin+avatarUrl)).text()),/卡通青蛙头像/);
+    assert.equal((await call('/api/profile/avatar','POST',{avatarData:null}))[0],401);
+    assert.equal((await call('/api/profile/avatar','POST',{avatarData:'data:image/svg+xml;base64,AAA'},registered.token))[0],400);
+    assert.equal((await call('/api/profile/avatar','POST',{avatarData:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/7L8AAAAASUVORK5CYII='},registered.token))[0],200);
+    assert.match((await fetch(origin+avatarUrl)).headers.get('content-type'),/image\/png/);
+    assert.equal((await call('/api/profile/avatar','POST',{avatarData:null},registered.token))[0],200);
+    assert.match((await fetch(origin+avatarUrl)).headers.get('content-type'),/image\/svg\+xml/);
+
     assert.equal((await call('/api/register', 'POST', { username:'testfrog', password:'password123' }))[0], 409);
     assert.equal((await call('/api/login', 'POST', { username:'testfrog', password:'wrong-password' }))[0], 401);
     assert.equal((await call('/api/login', 'POST', { username:'testfrog', password:'password123' }))[0], 200);
@@ -42,6 +51,7 @@ test('registration, guest permissions, unique votes, replies and rankings', asyn
     assert.deepEqual((await call('/api/suggestions/1/vote', 'POST', {}, token))[1], { ok:true, added:true });
     assert.deepEqual((await call('/api/suggestions/1/vote', 'POST', {}, token))[1], { ok:true, added:false });
     assert.equal((await call('/api/suggestions'))[1].items[0].votes, 1);
+    assert.equal((await call('/api/suggestions'))[1].items[0].userId,registered.user.id);
     const [topicStatus,topicCreated] = await call('/api/topics', 'POST', { title:'Tips', body:'How do you play?' }, token);
     assert.equal(topicStatus,201);
     assert.equal((await call(`/api/topics/${topicCreated.id}`))[1].item.title,'Tips');

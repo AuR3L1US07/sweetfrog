@@ -29,6 +29,15 @@ try {
   const [registered,player]=await call('/api/register','POST',{username:'testfrog',password:'password123'});
   assert.equal(registered,200,JSON.stringify(player));
   const token=player.token;
+  const avatarUrl=`/api/avatars/${player.user.id}`;
+  assert.match((await (await fetch(origin+avatarUrl)).text()),/卡通青蛙头像/);
+  assert.equal((await call('/api/profile/avatar','POST',{avatarData:null}))[0],401);
+  assert.equal((await call('/api/profile/avatar','POST',{avatarData:'data:image/svg+xml;base64,AAA'},token))[0],400);
+  assert.equal((await call('/api/profile/avatar','POST',{avatarData:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/7L8AAAAASUVORK5CYII='},token))[0],200);
+  assert.match((await fetch(origin+avatarUrl)).headers.get('content-type'),/image\/png/);
+  assert.equal((await call('/api/profile/avatar','POST',{avatarData:null},token))[0],200);
+  assert.match((await fetch(origin+avatarUrl)).headers.get('content-type'),/image\/svg\+xml/);
+
   assert.equal((await call('/api/register','POST',{username:'TESTFROG',password:'password123'}))[0],409);
   assert.equal((await call('/api/login','POST',{username:'testfrog',password:'wrong-password'}))[0],401);
   assert.equal((await call('/api/login','POST',{username:'testfrog',password:'password123'}))[0],200);
@@ -39,6 +48,7 @@ try {
   assert.equal((await call('/api/suggestions/1/vote','POST',{},token))[1].added,true);
   assert.equal((await call('/api/suggestions/1/vote','POST',{},token))[1].added,false);
   assert.equal((await call('/api/suggestions'))[1].items[0].votes,1);
+  assert.equal((await call('/api/suggestions'))[1].items[0].userId,player.user.id);
   const [topicStatus,topicCreated]=await call('/api/topics','POST',{title:'Tips',body:'How to play?'},token);
   assert.equal(topicStatus,201);
   assert.equal((await call(`/api/topics/${topicCreated.id}`))[1].item.title,'Tips');

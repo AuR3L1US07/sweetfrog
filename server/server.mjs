@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS scores(user_id INTEGER NOT NULL REFERENCES users(id),
 CREATE INDEX IF NOT EXISTS idx_scores_game_score ON scores(game,score DESC);`);
 if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'role')) db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'player'");
 if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'banned')) db.exec('ALTER TABLE users ADD COLUMN banned INTEGER NOT NULL DEFAULT 0');
+if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'avatar_data')) db.exec('ALTER TABLE users ADD COLUMN avatar_data TEXT');
 const adminName = process.env.SWEETFROG_ADMIN_USER;
 const adminPassword = process.env.SWEETFROG_ADMIN_PASSWORD;
 if (adminName && adminPassword) {
@@ -36,20 +37,23 @@ const mime = { '.html':'text/html; charset=utf-8', '.js':'text/javascript; chars
 function json(res, code, value) { res.writeHead(code, { 'content-type':'application/json; charset=utf-8', 'cache-control':'no-store' }); res.end(JSON.stringify(value)); }
 function fail(res, code, message) { json(res, code, { error: message }); }
 function rate(ip, scope, limit, period) { const key=`${ip}:${scope}`,now=Date.now();let bucket=limiter.get(key);if(!bucket||now>bucket.until)bucket={count:0,until:now+period};bucket.count++;limiter.set(key,bucket);return bucket.count<=limit; }
-async function body(req) { let raw='';for await(const chunk of req){raw+=chunk;if(raw.length>5000)throw Error('内容过长');}try{return JSON.parse(raw||'{}');}catch{throw Error('请求格式有误');} }
+async function body(req,max=5000) { let raw='';for await(const chunk of req){raw+=chunk;if(raw.length>max)throw Error('内容过长');}try{return JSON.parse(raw||'{}');}catch{throw Error('请求格式有误');} }
 function text(value,max) { return typeof value==='string'?value.trim().slice(0,max+1):''; }
 function hashPassword(password) { const salt=randomBytes(16).toString('hex');return `${salt}:${scryptSync(password,salt,64).toString('hex')}`; }
 function passwordMatches(password,stored) { const [salt,hex]=stored.split(':');return timingSafeEqual(scryptSync(password,salt,64),Buffer.from(hex,'hex')); }
 function tokenHash(token) { return createHash('sha256').update(token).digest('hex'); }
 function auth(req) { const token=/^Bearer ([a-f0-9]{64})$/.exec(req.headers.authorization||'')?.[1];if(!token)return null;return db.prepare('SELECT users.id,users.username,users.role FROM sessions JOIN users ON users.id=sessions.user_id WHERE token_hash=? AND expires_at>? AND users.banned=0').get(tokenHash(token),Date.now())||null; }
 function session(res,user) { const token=randomBytes(32).toString('hex');db.prepare('INSERT INTO sessions(token_hash,user_id,expires_at) VALUES(?,?,?)').run(tokenHash(token),user.id,Date.now()+30*86400000);json(res,200,{token,user:{id:user.id,username:user.username,role:user.role||'player'}}); }
-function suggestionList(userId) { return db.prepare(`SELECT s.id,s.title,s.body,s.created_at AS createdAt,u.username,(SELECT count(*) FROM suggestion_votes v WHERE v.suggestion_id=s.id) AS votes,EXISTS(SELECT 1 FROM suggestion_votes v WHERE v.suggestion_id=s.id AND v.user_id=?) AS voted FROM suggestions s JOIN users u ON u.id=s.user_id ORDER BY votes DESC,s.created_at DESC LIMIT 100`).all(userId||-1); }
-function topicList() { return db.prepare(`SELECT t.id,t.title,t.body,t.created_at AS createdAt,u.username,(SELECT count(*) FROM replies r WHERE r.topic_id=t.id) AS replyCount FROM topics t JOIN users u ON u.id=t.user_id ORDER BY t.created_at DESC LIMIT 100`).all(); }
-function rank(game,userId) { const entries=db.prepare(`SELECT u.username,s.score FROM scores s JOIN users u ON u.id=s.user_id WHERE s.game=? ORDER BY s.score DESC,s.updated_at ASC LIMIT 30`).all(game);let last=null,place=0;entries.forEach((entry,index)=>{if(entry.score!==last)place=index+1;last=entry.score;entry.rank=place;});const own=userId?db.prepare('SELECT score FROM scores WHERE game=? AND user_id=?').get(game,userId):null;const self=own?{score:own.score,rank:db.prepare('SELECT count(*) AS n FROM scores WHERE game=? AND score>?').get(game,own.score).n+1}:null;return{entries,self}; }
+function suggestionList(userId) { return db.prepare(`SELECT s.id,s.title,s.body,s.created_at AS createdAt,u.username,u.id AS userId,(SELECT count(*) FROM suggestion_votes v WHERE v.suggestion_id=s.id) AS votes,EXISTS(SELECT 1 FROM suggestion_votes v WHERE v.suggestion_id=s.id AND v.user_id=?) AS voted FROM suggestions s JOIN users u ON u.id=s.user_id ORDER BY votes DESC,s.created_at DESC LIMIT 100`).all(userId||-1); }
+function topicList() { return db.prepare(`SELECT t.id,t.title,t.body,t.created_at AS createdAt,u.username,u.id AS userId,(SELECT count(*) FROM replies r WHERE r.topic_id=t.id) AS replyCount FROM topics t JOIN users u ON u.id=t.user_id ORDER BY t.created_at DESC LIMIT 100`).all(); }
+function rank(game,userId) { const entries=db.prepare(`SELECT u.username,u.id AS userId,s.score FROM scores s JOIN users u ON u.id=s.user_id WHERE s.game=? ORDER BY s.score DESC,s.updated_at ASC LIMIT 30`).all(game);let last=null,place=0;entries.forEach((entry,index)=>{if(entry.score!==last)place=index+1;last=entry.score;entry.rank=place;});const own=userId?db.prepare('SELECT score FROM scores WHERE game=? AND user_id=?').get(game,userId):null;const self=own?{score:own.score,rank:db.prepare('SELECT count(*) AS n FROM scores WHERE game=? AND score>?').get(game,own.score).n+1}:null;return{entries,self}; }
 
 async function api(req,res,url) {
   const ip=req.socket.remoteAddress||'unknown',user=auth(req),method=req.method;
   if(method==='GET'&&url.pathname==='/api/session')return json(res,200,{user});
+  const avatarPath=/^\/api\/avatars\/(\d+)$/.exec(url.pathname);
+  if(method==='GET'&&avatarPath){const account=db.prepare('SELECT avatar_data FROM users WHERE id=?').get(Number(avatarPath[1]));if(!account)return fail(res,404,'玩家不存在');if(!account.avatar_data){res.writeHead(302,{'location':'/assets/default-frog-avatar.svg','cache-control':'no-store'});return res.end();}const match=/^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(account.avatar_data);if(!match)return fail(res,500,'头像暂时无法读取');const bytes=Buffer.from(match[2],'base64');res.writeHead(200,{'content-type':'image/'+match[1],'content-length':bytes.length,'cache-control':'no-store','x-content-type-options':'nosniff'});return res.end(bytes);}
+
   if(method==='POST'&&url.pathname==='/api/register') {
     if(!rate(ip,'auth',8,3600000))return fail(res,429,'尝试次数过多，请稍后再试');
     const data=await body(req),username=text(data.username,20),password=data.password;
@@ -70,6 +74,14 @@ async function api(req,res,url) {
   if(url.pathname==='/api/profile') {
     if(!user)return fail(res,401,'请先登录');
     if(method==='GET'){const profile=db.prepare('SELECT id,username,role,created_at AS createdAt FROM users WHERE id=?').get(user.id);return json(res,200,{profile});}
+  }
+  if(method==='POST'&&url.pathname==='/api/profile/avatar') {
+    if(!user)return fail(res,401,'请先登录');
+    if(!rate(`user${user.id}`,'avatar',12,3600000))return fail(res,429,'修改太频繁，请稍后再试');
+    const data=await body(req,90000),avatar=data.avatarData;
+    if(avatar!==null&&(typeof avatar!=='string'||avatar.length>70000||!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(avatar)))return fail(res,400,'头像格式或大小不支持');
+    db.prepare('UPDATE users SET avatar_data=? WHERE id=?').run(avatar,user.id);
+    return json(res,200,{ok:true});
   }
   if(method==='POST'&&url.pathname.startsWith('/api/profile/')) {
     if(!user)return fail(res,401,'请先登录');
@@ -95,16 +107,16 @@ async function api(req,res,url) {
 
   if(method==='GET'&&url.pathname==='/api/suggestions')return json(res,200,{items:suggestionList(user?.id)});
   const suggestionDetail=/^\/api\/suggestions\/(\d+)$/.exec(url.pathname);
-  if(method==='GET'&&suggestionDetail){const item=db.prepare(`SELECT s.id,s.title,s.body,s.created_at AS createdAt,u.username,(SELECT count(*) FROM suggestion_votes v WHERE v.suggestion_id=s.id) AS votes,EXISTS(SELECT 1 FROM suggestion_votes v WHERE v.suggestion_id=s.id AND v.user_id=?) AS voted FROM suggestions s JOIN users u ON u.id=s.user_id WHERE s.id=?`).get(user?.id||-1,Number(suggestionDetail[1]));return item?json(res,200,{item}):fail(res,404,'建议不存在');}
+  if(method==='GET'&&suggestionDetail){const item=db.prepare(`SELECT s.id,s.title,s.body,s.created_at AS createdAt,u.username,u.id AS userId,(SELECT count(*) FROM suggestion_votes v WHERE v.suggestion_id=s.id) AS votes,EXISTS(SELECT 1 FROM suggestion_votes v WHERE v.suggestion_id=s.id AND v.user_id=?) AS voted FROM suggestions s JOIN users u ON u.id=s.user_id WHERE s.id=?`).get(user?.id||-1,Number(suggestionDetail[1]));return item?json(res,200,{item}):fail(res,404,'建议不存在');}
   if(method==='POST'&&url.pathname==='/api/suggestions') { if(!user)return fail(res,401,'请先登录');if(!rate(`user${user.id}`,'post',20,3600000))return fail(res,429,'发布太频繁');const data=await body(req),title=text(data.title,80),content=text(data.body,500);if(!title||title.length>80||!content||content.length>500)return fail(res,400,'标题或内容长度不合适');const result=db.prepare('INSERT INTO suggestions(user_id,title,body) VALUES(?,?,?)').run(user.id,title,content);return json(res,201,{ok:true,id:Number(result.lastInsertRowid)}); }
   const vote=/^\/api\/suggestions\/(\d+)\/vote$/.exec(url.pathname);
   if(method==='POST'&&vote) { if(!user)return fail(res,401,'请先登录');if(!db.prepare('SELECT id FROM suggestions WHERE id=?').get(Number(vote[1])))return fail(res,404,'提议不存在');const result=db.prepare('INSERT OR IGNORE INTO suggestion_votes(suggestion_id,user_id) VALUES(?,?)').run(Number(vote[1]),user.id);return json(res,200,{ok:true,added:result.changes===1}); }
   if(method==='GET'&&url.pathname==='/api/topics')return json(res,200,{items:topicList()});
   const topicDetail=/^\/api\/topics\/(\d+)$/.exec(url.pathname);
-  if(method==='GET'&&topicDetail){const item=db.prepare(`SELECT t.id,t.title,t.body,t.created_at AS createdAt,u.username,(SELECT count(*) FROM replies r WHERE r.topic_id=t.id) AS replyCount FROM topics t JOIN users u ON u.id=t.user_id WHERE t.id=?`).get(Number(topicDetail[1]));return item?json(res,200,{item}):fail(res,404,'帖子不存在');}
+  if(method==='GET'&&topicDetail){const item=db.prepare(`SELECT t.id,t.title,t.body,t.created_at AS createdAt,u.username,u.id AS userId,(SELECT count(*) FROM replies r WHERE r.topic_id=t.id) AS replyCount FROM topics t JOIN users u ON u.id=t.user_id WHERE t.id=?`).get(Number(topicDetail[1]));return item?json(res,200,{item}):fail(res,404,'帖子不存在');}
   if(method==='POST'&&url.pathname==='/api/topics') { if(!user)return fail(res,401,'请先登录');if(!rate(`user${user.id}`,'post',20,3600000))return fail(res,429,'发布太频繁');const data=await body(req),title=text(data.title,80),content=text(data.body,2000);if(!title||title.length>80||!content||content.length>2000)return fail(res,400,'标题或内容长度不合适');const result=db.prepare('INSERT INTO topics(user_id,title,body) VALUES(?,?,?)').run(user.id,title,content);return json(res,201,{ok:true,id:Number(result.lastInsertRowid)}); }
   const replies=/^\/api\/topics\/(\d+)\/replies$/.exec(url.pathname);
-  if(replies&&method==='GET')return json(res,200,{items:db.prepare('SELECT r.id,r.body,r.created_at AS createdAt,u.username FROM replies r JOIN users u ON u.id=r.user_id WHERE r.topic_id=? ORDER BY r.created_at ASC LIMIT 200').all(Number(replies[1]))});
+  if(replies&&method==='GET')return json(res,200,{items:db.prepare('SELECT r.id,r.body,r.created_at AS createdAt,u.username,u.id AS userId FROM replies r JOIN users u ON u.id=r.user_id WHERE r.topic_id=? ORDER BY r.created_at ASC LIMIT 200').all(Number(replies[1]))});
   if(replies&&method==='POST') { if(!user)return fail(res,401,'请先登录');if(!rate(`user${user.id}`,'post',20,3600000))return fail(res,429,'发布太频繁');if(!db.prepare('SELECT id FROM topics WHERE id=?').get(Number(replies[1])))return fail(res,404,'话题不存在');const data=await body(req),content=text(data.body,1000);if(!content||content.length>1000)return fail(res,400,'回复长度不合适');db.prepare('INSERT INTO replies(topic_id,user_id,body) VALUES(?,?,?)').run(Number(replies[1]),user.id,content);return json(res,201,{ok:true}); }
   const leader=/^\/api\/leaderboards\/(tap|merge|flap|puzzle|aim)$/.exec(url.pathname);
   if(leader&&method==='GET')return json(res,200,rank(leader[1],user?.id));

@@ -10,16 +10,26 @@ const descriptions = {
  puzzle: {title:'青蛙2048',category:'FRIENDSHIP EVOLUTION',intro:'相同数字与照片合并，向 2048 进化。',rules:'滑动或按方向键移动全部方块。\n相同数字合并，每次移动出现新方块。\n合出 2048 后还能继续挑战！',hint:'滑动屏幕 / 使用方向键 · 相同数字才能合并',extra:'最高方块'}
 };
 let active = null, session = null, running = false, paused = false, score = 0, raf = 0, lastTime = 0;
-let sound = false, audioCtx, toastTimer;
+let sound = true, audioCtx, toastTimer, ambientTimer, ambientStep=0;
+try { sound = localStorage.getItem('sweetfrog-sound') !== 'off'; } catch {}
 const records = {};
 for (const key of Object.keys(descriptions)) { try { records[key] = Math.max(0, Number(localStorage.getItem('sweetfrog-best-' + key)) || 0); } catch { records[key] = 0; } }
 function updateRecords() { document.querySelectorAll('[data-best]').forEach(el => { el.textContent = '最高 ' + records[el.dataset.best] + ' 分'; }); }
 updateRecords();
 function setScore(value) { score = value; $('#score').textContent = value; if (value > records[active]) { records[active] = value; try { localStorage.setItem('sweetfrog-best-' + active, value); } catch {} } $('#best').textContent = records[active]; }
 function extra(value) { $('#extra').textContent = value; }
-function beep(frequency = 520, duration = .065) { if (!sound) return; try { audioCtx ||= new (window.AudioContext || window.webkitAudioContext)(); audioCtx.resume(); const oscillator = audioCtx.createOscillator(), gain = audioCtx.createGain(); oscillator.connect(gain); gain.connect(audioCtx.destination); oscillator.frequency.value = frequency; oscillator.type = 'sine'; gain.gain.setValueAtTime(.05, audioCtx.currentTime); gain.gain.exponentialRampToValueAtTime(.001, audioCtx.currentTime + duration); oscillator.start(); oscillator.stop(audioCtx.currentTime + duration); } catch {} }
+function ensureAudio(){if(!sound)return null;try{audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();if(audioCtx.state==='suspended')audioCtx.resume();if(!ambientTimer)ambientTimer=setInterval(playAmbient,820);return audioCtx;}catch{return null;}}
+function note(frequency,at,duration,volume,type='sine'){const ctx=audioCtx;if(!ctx||ctx.state!=='running')return;const osc=ctx.createOscillator(),gain=ctx.createGain();osc.type=type;osc.frequency.setValueAtTime(frequency,at);gain.gain.setValueAtTime(.0001,at);gain.gain.linearRampToValueAtTime(volume,at+.08);gain.gain.exponentialRampToValueAtTime(.0001,at+duration);osc.connect(gain);gain.connect(ctx.destination);osc.start(at);osc.stop(at+duration+.01);}
+function playAmbient(){if(!sound||document.hidden||!audioCtx||audioCtx.state!=='running')return;const melody=[261.63,329.63,392,329.63,293.66,349.23,440,349.23,261.63,329.63,392,493.88,349.23,329.63,293.66,261.63];const now=audioCtx.currentTime;note(melody[ambientStep%melody.length],now,.75,.012);if(ambientStep%4===0)note([130.81,146.83,174.61,130.81][Math.floor(ambientStep/4)%4],now,2.3,.006);ambientStep++;}
+function beep(frequency=520,duration=.065){const ctx=ensureAudio();if(!ctx)return;try{const at=ctx.currentTime,osc=ctx.createOscillator(),gain=ctx.createGain();osc.type=frequency>=400?'triangle':'sine';osc.frequency.setValueAtTime(frequency,at);osc.frequency.exponentialRampToValueAtTime(Math.max(60,frequency*(frequency>=400?.68:.78)),at+duration);gain.gain.setValueAtTime(.0001,at);gain.gain.linearRampToValueAtTime(.07,at+.005);gain.gain.exponentialRampToValueAtTime(.0001,at+duration);osc.connect(gain);gain.connect(ctx.destination);osc.start(at);osc.stop(at+duration+.01);if(frequency>=400){const pop=ctx.createOscillator(),popGain=ctx.createGain();pop.type='square';pop.frequency.setValueAtTime(frequency*.55,at);pop.frequency.exponentialRampToValueAtTime(Math.max(80,frequency*.25),at+.04);popGain.gain.setValueAtTime(.015,at);popGain.gain.exponentialRampToValueAtTime(.0001,at+.045);pop.connect(popGain);popGain.connect(ctx.destination);pop.start(at);pop.stop(at+.05);}}catch{}}
+
 function toast(message) { $('#toast').textContent = message; $('#toast').classList.add('visible'); clearTimeout(toastTimer); toastTimer = setTimeout(() => $('#toast').classList.remove('visible'), 1800); }
-$('#sound-toggle').onclick = () => { sound = !sound; $('#sound-toggle').textContent = sound ? '♪ 音效开' : '♪ 音效关'; $('#sound-toggle').setAttribute('aria-pressed', String(sound)); beep(); };
+function syncSound(){const toggle=$('#sound-toggle');toggle.textContent=sound?'♫ 声音开':'♫ 声音关';toggle.setAttribute('aria-pressed',String(sound));toggle.setAttribute('aria-label',sound?'关闭音乐和音效':'开启音乐和音效');}
+syncSound();
+$('#sound-toggle').onclick=()=>{sound=!sound;try{localStorage.setItem('sweetfrog-sound',sound?'on':'off');}catch{}syncSound();if(sound){ensureAudio();beep(660,.08);}else audioCtx?.suspend();};
+document.addEventListener('pointerdown',ensureAudio,{once:true});
+document.addEventListener('keydown',ensureAudio,{once:true});
+
 // Source rectangles are display framing only; the provided originals remain intact.
 const frames = [[0,.22,.55,.42],[.04,.02,.69,.56],[.28,.14,.43,.195],[.53,.44,.44,.20],[.11,.145,.33,.148]];
 const photos = Array.from({length:5}, (_,i) => { const im = new Image(); im.src = `./assets/photo-${i+1}.jpg`; return im; });

@@ -5,8 +5,8 @@ const digest = async value => hex(await crypto.subtle.digest('SHA-256', encode.e
 const json = (data, status = 200) => Response.json(data, { status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
 function fail(status, message) { throw Object.assign(new Error(message), { status }); }
 function text(value, max) { return typeof value === 'string' ? value.trim().slice(0, max + 1) : ''; }
-async function body(request) {
-  if (Number(request.headers.get('content-length')) > 16000) fail(400, '内容过长');
+async function body(request, max=16000) {
+  if (Number(request.headers.get('content-length')) > max) fail(400, '内容过长');
   const reader = request.body?.getReader();
   if (!reader) return {};
   let size = 0;
@@ -15,7 +15,7 @@ async function body(request) {
     const { value, done } = await reader.read();
     if (done) break;
     size += value.length;
-    if (size > 16000) { await reader.cancel(); fail(400, '内容过长'); }
+    if (size > max) { await reader.cancel(); fail(400, '内容过长'); }
     chunks.push(value);
   }
   const bytes = new Uint8Array(size);
@@ -67,10 +67,10 @@ export async function handleApi(request, env) {
       ]);
       return json({ token:value, user:{ id:account.id, username:account.username, role:account.role || 'player' } });
     }
-    const suggestions = () => all(`SELECT s.id,s.title,s.body,s.created_at AS createdAt,u.username,(SELECT count(*) FROM suggestion_votes v WHERE v.suggestion_id=s.id) AS votes,EXISTS(SELECT 1 FROM suggestion_votes v WHERE v.suggestion_id=s.id AND v.user_id=?) AS voted FROM suggestions s JOIN users u ON u.id=s.user_id ORDER BY votes DESC,s.created_at DESC,s.id DESC LIMIT 100`, user?.id || -1);
-    const topics = () => all(`SELECT t.id,t.title,t.body,t.created_at AS createdAt,u.username,(SELECT count(*) FROM replies r WHERE r.topic_id=t.id) AS replyCount FROM topics t JOIN users u ON u.id=t.user_id ORDER BY t.created_at DESC,t.id DESC LIMIT 100`);
+    const suggestions = () => all(`SELECT s.id,s.title,s.body,s.created_at AS createdAt,u.username,u.id AS userId,(SELECT count(*) FROM suggestion_votes v WHERE v.suggestion_id=s.id) AS votes,EXISTS(SELECT 1 FROM suggestion_votes v WHERE v.suggestion_id=s.id AND v.user_id=?) AS voted FROM suggestions s JOIN users u ON u.id=s.user_id ORDER BY votes DESC,s.created_at DESC,s.id DESC LIMIT 100`, user?.id || -1);
+    const topics = () => all(`SELECT t.id,t.title,t.body,t.created_at AS createdAt,u.username,u.id AS userId,(SELECT count(*) FROM replies r WHERE r.topic_id=t.id) AS replyCount FROM topics t JOIN users u ON u.id=t.user_id ORDER BY t.created_at DESC,t.id DESC LIMIT 100`);
     async function rank(game) {
-      const entries = await all('SELECT u.username,s.score FROM scores s JOIN users u ON u.id=s.user_id WHERE s.game=? ORDER BY s.score DESC,s.updated_at ASC,s.user_id ASC LIMIT 30', game);
+      const entries = await all('SELECT u.username,u.id AS userId,s.score FROM scores s JOIN users u ON u.id=s.user_id WHERE s.game=? ORDER BY s.score DESC,s.updated_at ASC,s.user_id ASC LIMIT 30', game);
       let last = null, place = 0;
       entries.forEach((entry,index) => { if (entry.score !== last) place=index+1; last=entry.score; entry.rank=place; });
       const own = user ? await first('SELECT score FROM scores WHERE game=? AND user_id=?', game, user.id) : null;
@@ -78,6 +78,17 @@ export async function handleApi(request, env) {
       return { entries, self };
     }
     if (method === 'GET' && path === '/api/session') return json({ user });
+    const avatarPath=/^\/api\/avatars\/(\d+)$/.exec(path);
+    if (method==='GET' && avatarPath) {
+      const account=await first('SELECT avatar_data FROM users WHERE id=?',Number(avatarPath[1]));
+      if(!account)fail(404,'玩家不存在');
+      if(!account.avatar_data)return Response.redirect(new URL('/assets/default-frog-avatar.svg',request.url),302);
+      const match=/^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(account.avatar_data);
+      if(!match)fail(500,'头像暂时无法读取');
+      const bytes=Uint8Array.from(atob(match[2]),char=>char.charCodeAt(0));
+      return new Response(bytes,{headers:{'Content-Type':'image/'+match[1],'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
+    }
+
     if (method === 'POST' && (path === '/api/register' || path === '/api/login')) {
       await rate(`auth:${request.headers.get('CF-Connecting-IP') || 'local'}`, 8);
       const data = await body(request), username = text(data.username,20), password = data.password;
@@ -100,6 +111,13 @@ export async function handleApi(request, env) {
     if (path === '/api/profile') {
       requireUser();
       if (method==='GET') return json({profile:await first('SELECT id,username,role,created_at AS createdAt FROM users WHERE id=?',user.id)});
+    }
+    if (method==='POST' && path==='/api/profile/avatar') {
+      requireUser(); await rate(`avatar:${user.id}`,12);
+      const data=await body(request,90000),avatar=data.avatarData;
+      if(avatar!==null&&(typeof avatar!=='string'||avatar.length>70000||!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(avatar)))fail(400,'头像格式或大小不支持');
+      await run('UPDATE users SET avatar_data=? WHERE id=?',avatar,user.id);
+      return json({ok:true});
     }
     if (method==='POST' && path.startsWith('/api/profile/')) {
       requireUser(); await rate(`profile:${user.id}`,8);
@@ -128,8 +146,8 @@ export async function handleApi(request, env) {
     if (detail && method==='GET') {
       const [,,rawId]=detail, id=Number(rawId), suggestion=detail[1]==='suggestions';
       const item=suggestion
-        ? await first(`SELECT s.id,s.title,s.body,s.created_at AS createdAt,u.username,(SELECT count(*) FROM suggestion_votes v WHERE v.suggestion_id=s.id) AS votes,EXISTS(SELECT 1 FROM suggestion_votes v WHERE v.suggestion_id=s.id AND v.user_id=?) AS voted FROM suggestions s JOIN users u ON u.id=s.user_id WHERE s.id=?`,user?.id||-1,id)
-        : await first(`SELECT t.id,t.title,t.body,t.created_at AS createdAt,u.username,(SELECT count(*) FROM replies r WHERE r.topic_id=t.id) AS replyCount FROM topics t JOIN users u ON u.id=t.user_id WHERE t.id=?`,id);
+        ? await first(`SELECT s.id,s.title,s.body,s.created_at AS createdAt,u.username,u.id AS userId,(SELECT count(*) FROM suggestion_votes v WHERE v.suggestion_id=s.id) AS votes,EXISTS(SELECT 1 FROM suggestion_votes v WHERE v.suggestion_id=s.id AND v.user_id=?) AS voted FROM suggestions s JOIN users u ON u.id=s.user_id WHERE s.id=?`,user?.id||-1,id)
+        : await first(`SELECT t.id,t.title,t.body,t.created_at AS createdAt,u.username,u.id AS userId,(SELECT count(*) FROM replies r WHERE r.topic_id=t.id) AS replyCount FROM topics t JOIN users u ON u.id=t.user_id WHERE t.id=?`,id);
       if (!item) fail(404,suggestion?'建议不存在':'帖子不存在');
       return json({item});
     }
@@ -152,7 +170,7 @@ export async function handleApi(request, env) {
       return json({ok:true,added:result.meta.changes===1});
     }
     const replies=/^\/api\/topics\/(\d+)\/replies$/.exec(path);
-    if (replies && method==='GET') return json({items:await all('SELECT r.id,r.body,r.created_at AS createdAt,u.username FROM replies r JOIN users u ON u.id=r.user_id WHERE r.topic_id=? ORDER BY r.created_at ASC,r.id ASC LIMIT 200',Number(replies[1]))});
+    if (replies && method==='GET') return json({items:await all('SELECT r.id,r.body,r.created_at AS createdAt,u.username,u.id AS userId FROM replies r JOIN users u ON u.id=r.user_id WHERE r.topic_id=? ORDER BY r.created_at ASC,r.id ASC LIMIT 200',Number(replies[1]))});
     if (replies && method==='POST') {
       requireUser(); await rate(`post:${user.id}`,20);
       if (!await first('SELECT id FROM topics WHERE id=?',Number(replies[1]))) fail(404,'话题不存在');

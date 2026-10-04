@@ -11,6 +11,11 @@ try {
   await page.locator('.club-heading h1').getByText('意见留言').waitFor();
   assert.match(await page.locator('.club-gate').textContent(), /登录后可以发布建议/);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  assert.match(await page.locator('#sound-toggle').textContent(),/声音开/);
+  await page.locator('#sound-toggle').click();
+  assert.equal(await page.locator('#sound-toggle').getAttribute('aria-pressed'),'false');
+  await page.locator('#sound-toggle').click();
+  assert.equal(await page.locator('#sound-toggle').getAttribute('aria-pressed'),'true');
   await page.goto(base + '#account');
   await page.getByRole('button', { name: '注册', exact: true }).click();
   const username = 'frog' + Math.floor(Math.random() * 100000000);
@@ -32,6 +37,12 @@ try {
   await page.getByRole('button',{name:'保存用户名'}).click();
   await page.getByText('用户名已更新。').waitFor();
   assert.match(await page.locator('#account-chip').textContent(),new RegExp(renamed));
+  const dataUrl=await page.evaluate(()=>{const c=document.createElement('canvas');c.width=200;c.height=200;const x=c.getContext('2d');x.fillStyle='#ed7c74';x.fillRect(0,0,200,200);return c.toDataURL('image/png');});
+  await page.locator('.profile-avatar-form input[type=file]').setInputFiles({name:'avatar.png',mimeType:'image/png',buffer:Buffer.from(dataUrl.split(',')[1],'base64')});
+  await page.getByRole('button',{name:'保存头像'}).click();
+  await page.getByText('头像已更新。').waitFor();
+  const playerId=Number((await page.locator('#account-chip').textContent()).match(/ID (\d+)/)[1]);
+  assert.match((await page.request.get(base+`api/avatars/${playerId}`)).headers()['content-type'],/image\/webp|image\/jpeg/);
   await page.goto(base + '#suggestions');
   const suggestionTitle = '测试提议' + username;
   await page.locator('.club-form [name=title]').fill(suggestionTitle);
@@ -39,6 +50,7 @@ try {
   await page.getByRole('button', { name: '发布建议 ↗' }).click();
   await page.waitForURL('**/#suggestions/*');
   await page.getByRole('heading', { name: suggestionTitle }).waitFor();
+  assert.match(await page.locator('.forum-detail .club-avatar').getAttribute('src'),new RegExp(`/api/avatars/${playerId}`));
   await page.locator('.forum-detail .vote-button').click();
   await page.locator('.forum-detail .vote-button').getByText('1').waitFor();
   assert.match(await page.locator('.forum-detail .vote-button').textContent(), /1/);
@@ -61,6 +73,9 @@ try {
   await page.goto(base + '#leaderboard');
   assert.equal(await page.locator('.club-tab').count(), 5);
   await page.goto(base + '#profile');
+  await page.getByRole('button',{name:'恢复默认头像'}).click();
+  await page.getByText('已恢复默认头像。').waitFor();
+  assert.match((await page.request.get(base+`api/avatars/${playerId}`)).headers()['content-type'],/image\/svg\+xml/);
   await page.locator('.profile-panel').nth(1).locator('[name=currentPassword]').fill('testpassword123');
   await page.locator('.profile-panel').nth(1).locator('[name=newPassword]').fill('changedPassword456!');
   await page.locator('.profile-panel').nth(1).locator('[name=confirmPassword]').fill('mismatchPassword456!');

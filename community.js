@@ -12,23 +12,24 @@ const nav=$('.site-header nav');
 for(const [route,label] of [['suggestions','意见留言'],['discussion','玩家社区'],['leaderboard','排行榜']]){const link=el('a','club-nav-link',label);link.href='#'+route;link.dataset.clubNav=route;nav.insertBefore(link,$('#sound-toggle'));}
 const rankLink=el('a','game-rank-link','查看本游戏排行榜 ↗');rankLink.href='#leaderboard';$('#game-screen .play-footer').before(rankLink);
 let token='';try{token=localStorage.getItem('sweetfrog-session')||'';}catch{}
-let user=null,rankGame='tap',accountMode='login',returnTo='games',accountMessage='';
+let user=null,rankGame='tap',accountMode='login',returnTo='games',accountMessage='',avatarVersion=0;
 const friendlyError=error=>error.message||'暂时连接不上服务器，请稍后重试。';
 async function request(path,options={}){
   return communityRequest(path,options,token);
 }
 async function refreshSession(){if(!token){user=null;return;}try{user=(await request('/api/session')).user;if(!user)clearSession();}catch{user=null;}}
 function clearSession(){token='';user=null;try{localStorage.removeItem('sweetfrog-session');}catch{}}
-function syncAdminLink(){let link=$('#admin-nav-link');if(user?.role==='admin'&&!link){link=el('a','club-nav-link','管理后台');link.id='admin-nav-link';link.href='./admin.html';$('#sound-toggle').before(link);}else if(user?.role!=='admin')link?.remove();const chip=$('#account-chip');chip.href=user?'#profile':'#account';chip.replaceChildren(...(user?[el('span','account-chip-name',user.username),el('small','',`ID ${user.id}`)]:[document.createTextNode('登录 / 注册')]));chip.classList.toggle('signed-in',Boolean(user));chip.setAttribute('aria-label',user?`个人信息：${user.username}，玩家 ID ${user.id}`:'登录或注册');}
+function avatarUrl(id){return id?`/api/avatars/${id}${user?.id===id?`?v=${avatarVersion}`:''}`:'./assets/default-frog-avatar.svg';}
+function memberAvatar(id,name,className='club-avatar'){const img=el('img',className);img.src=avatarUrl(id);img.alt=name?`${name}的头像`:'卡通青蛙头像';img.loading='lazy';img.onerror=()=>{img.onerror=null;img.src='./assets/default-frog-avatar.svg';};return img;}
+function syncAdminLink(){let link=$('#admin-nav-link');if(user?.role==='admin'&&!link){link=el('a','club-nav-link','管理后台');link.id='admin-nav-link';link.href='./admin.html';$('#sound-toggle').before(link);}else if(user?.role!=='admin')link?.remove();const chip=$('#account-chip');chip.href=user?'#profile':'#account';chip.replaceChildren(...(user?[memberAvatar(user.id,'','account-chip-avatar'),el('span','account-chip-name',user.username),el('small','',`ID ${user.id}`)]:[document.createTextNode('登录 / 注册')]));chip.classList.toggle('signed-in',Boolean(user));chip.setAttribute('aria-label',user?`个人信息：${user.username}，玩家 ID ${user.id}`:'登录或注册');}
 function saveSession(data){token=data.token;user=data.user;try{localStorage.setItem('sweetfrog-session',token);}catch{}syncAdminLink();}
 function heading(eyebrow,title,description){const wrap=el('div','club-heading');wrap.innerHTML=`<span class="eyebrow"></span><h1></h1><p></p>`;wrap.querySelector('.eyebrow').textContent=eyebrow;wrap.querySelector('h1').textContent=title;wrap.querySelector('p').textContent=description;return wrap;}
 function notice(message){return el('p','club-notice',message);}
 function time(value){const date=new Date(value.replace(' ','T')+'Z');return Number.isNaN(date.getTime())?'刚刚':new Intl.DateTimeFormat('zh-CN',{month:'numeric',day:'numeric'}).format(date);}
 function gate(message){const wrap=el('div','club-gate');wrap.append(el('p','',message));const link=el('a','club-action','登录 / 注册 ↗');link.href='#account';link.addEventListener('click',()=>{returnTo=location.hash.slice(1)||'games';});wrap.append(link);return wrap;}
 function form(label,max,submit,after){const node=el('form','club-form');node.innerHTML=`<label>标题<input name="title" required></label><label>内容<textarea name="body" required rows="4"></textarea></label><button type="submit"></button><p class="club-form-status" role="status"></p>`;node.querySelector('[name=title]').maxLength=80;node.querySelector('[name=body]').maxLength=max;node.querySelector('button').textContent=label;node.addEventListener('submit',async event=>{event.preventDefault();const button=node.querySelector('button'),status=node.querySelector('[role=status]');button.disabled=true;status.textContent='正在发布…';try{const result=await submit({title:node.elements.title.value.trim(),body:node.elements.body.value.trim()});node.reset();status.textContent='发布成功！';if(after)after(result);else await renderCurrent();}catch(error){status.textContent=friendlyError(error);}finally{button.disabled=false;}});return node;}
-function cardHead(item){const head=el('div','club-card-head');head.append(el('strong','',item.username),el('time','',time(item.createdAt)));return head;}
-function memberMark(name){const mark=el('span','club-avatar',Array.from(name||'?')[0]?.toUpperCase()||'?');mark.setAttribute('aria-hidden','true');return mark;}
-function postMeta(item){const meta=el('div','forum-meta');meta.append(memberMark(item.username),el('strong','',item.username),el('time','',time(item.createdAt)));return meta;}
+function cardHead(item){const head=el('div','club-card-head');head.append(memberAvatar(item.userId,item.username),el('strong','',item.username),el('time','',time(item.createdAt)));return head;}
+function postMeta(item){const meta=el('div','forum-meta');meta.append(memberAvatar(item.userId,item.username),el('strong','',item.username),el('time','',time(item.createdAt)));return meta;}
 function sectionTop(content,type){
   const isIdea=type==='suggestions';
   content.append(heading(isIdea?'IDEA BOARD':'FROG FORUM',isIdea?'意见留言':'玩家社区',isIdea?'喜欢的建议，点个赞让它排到前面。':'聊游戏、晒成绩，或者发起一场新讨论。'));
@@ -92,9 +93,25 @@ async function leaderboard(content){
   const tabs=el('div','club-tabs');for(const [game,label] of Object.entries(games)){const tab=makeButton(label,()=>{rankGame=game;renderCurrent();},'club-tab');tab.classList.toggle('selected',game===rankGame);tab.setAttribute('aria-pressed',String(game===rankGame));tabs.append(tab);}content.append(tabs);
   const list=el('ol','club-ranks');content.append(list);list.append(notice('正在读取成绩…'));
   try{const data=await request(`/api/leaderboards/${rankGame}`);list.replaceChildren();if(!data.entries.length)list.append(notice('还没有玩家上榜，来拿第一名吧。'));
-    for(const entry of data.entries){const item=el('li','club-rank');item.append(el('span','club-rank-num',String(entry.rank).padStart(2,'0')),el('span','club-rank-name',entry.username),el('strong','club-rank-score',`${entry.score} 分`));list.append(item);}
+    for(const entry of data.entries){const item=el('li','club-rank');item.append(el('span','club-rank-num',String(entry.rank).padStart(2,'0')),memberAvatar(entry.userId,entry.username,'club-rank-avatar'),el('span','club-rank-name',entry.username),el('strong','club-rank-score',`${entry.score} 分`));list.append(item);}
     content.append(el('div','club-my-rank',user?(data.self?`你的排名：第 ${data.self.rank} 名 · ${data.self.score} 分`:'你还未在这款游戏上榜，完成一局后自动提交。'):'游客可以看榜；注册登录后才能上榜。'));
   }catch(error){list.replaceChildren(notice(friendlyError(error)));}
+}
+async function prepareAvatar(file){
+  if(file.size>8*1024*1024)throw Error('请选择小于 8 MB 的图片。');
+  const url=URL.createObjectURL(file);
+  try{
+    const source=new Image();source.src=url;await source.decode();
+    const canvas=document.createElement('canvas');canvas.width=160;canvas.height=160;
+    const ctx=canvas.getContext('2d');if(!ctx)throw Error('当前浏览器无法处理图片。');
+    const side=Math.min(source.naturalWidth,source.naturalHeight);
+    ctx.drawImage(source,(source.naturalWidth-side)/2,(source.naturalHeight-side)/2,side,side,0,0,160,160);
+    let data=canvas.toDataURL('image/webp',.8);
+    if(!data.startsWith('data:image/webp'))data=canvas.toDataURL('image/jpeg',.8);
+    if(data.length>70000)data=canvas.toDataURL(data.startsWith('data:image/webp')?'image/webp':'image/jpeg',.58);
+    if(data.length>70000)throw Error('头像处理后仍过大，请换一张图片。');
+    return data;
+  }finally{URL.revokeObjectURL(url);}
 }
 async function profile(content){
   content.append(heading('MY FROG ID','个人信息','查看账号资料，修改昵称或密码。'));
@@ -103,6 +120,18 @@ async function profile(content){
   overview.append(el('span','profile-eyebrow','PLAYER CARD'),el('h2','',user.username));
   const facts=el('dl','profile-facts');facts.append(el('dt','','玩家 ID'),el('dd','',String(user.id)),el('dt','','账号身份'),el('dd','',user.role==='admin'?'管理员':'玩家'));
   overview.append(facts);content.append(overview);
+  const avatarPanel=el('section','profile-avatar-panel');
+  const currentAvatar=memberAvatar(user.id,'','profile-avatar');
+  const avatarControls=el('div','profile-avatar-controls');
+  avatarControls.append(el('h2','','我的头像'),el('p','','未上传时显示卡通青蛙头像。'));
+  const avatarForm=el('form','profile-avatar-form');
+  const avatarLabel=el('label','','选择图片');const fileInput=el('input');fileInput.type='file';fileInput.accept='image/png,image/jpeg,image/webp';avatarLabel.append(fileInput);
+  const saveAvatar=el('button','','保存头像');saveAvatar.type='submit';
+  const resetAvatar=makeButton('恢复默认头像',async()=>{resetAvatar.disabled=true;avatarStatus.textContent='正在恢复…';try{await request('/api/profile/avatar',{method:'POST',body:JSON.stringify({avatarData:null})});avatarVersion++;currentAvatar.src=avatarUrl(user.id);syncAdminLink();avatarStatus.textContent='已恢复默认头像。';}catch(error){avatarStatus.textContent=friendlyError(error);}finally{resetAvatar.disabled=false;}},'profile-avatar-reset');
+  const avatarStatus=el('p','profile-avatar-status');avatarStatus.setAttribute('role','status');
+  avatarForm.append(avatarLabel,saveAvatar,resetAvatar,avatarStatus);
+  avatarForm.addEventListener('submit',async event=>{event.preventDefault();const file=fileInput.files?.[0];if(!file){avatarStatus.textContent='请先选择一张图片。';return;}if(!['image/png','image/jpeg','image/webp'].includes(file.type)){avatarStatus.textContent='请选择 PNG、JPG 或 WebP 图片。';return;}saveAvatar.disabled=true;avatarStatus.textContent='正在处理头像…';try{const avatarData=await prepareAvatar(file);await request('/api/profile/avatar',{method:'POST',body:JSON.stringify({avatarData})});avatarVersion++;currentAvatar.src=avatarUrl(user.id);syncAdminLink();fileInput.value='';avatarStatus.textContent='头像已更新。';}catch(error){avatarStatus.textContent=friendlyError(error);}finally{saveAvatar.disabled=false;}});
+  avatarControls.append(avatarForm);avatarPanel.append(currentAvatar,avatarControls);content.append(avatarPanel);
   try{const {profile}=await request('/api/profile');const created=el('p','profile-created','注册时间：'+time(profile.createdAt));overview.append(created);}
   catch(error){overview.append(notice(friendlyError(error)));}
   const grid=el('div','profile-grid');content.append(grid);
