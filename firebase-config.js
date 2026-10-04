@@ -1,5 +1,4 @@
-// Copy the web app configuration from Firebase Console into this object.
-// These browser identifiers are public; never put a service-account key here.
+// Retained integration point for a future Firebase project. These web IDs are public.
 export const firebaseConfig = {
   apiKey: '',
   authDomain: '',

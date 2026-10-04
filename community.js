@@ -1,168 +1,69 @@
-import { firebaseConfig } from './firebase-config.js';
+import { communityRequest } from './community-transport.js';
 
-const games = { tap: '逮住大青蛙', merge: '合成大青蛙', flap: '青蛙起飞', puzzle: '青蛙2048', aim: '青蛙定位练习' };
-const configured = Boolean(firebaseConfig.apiKey && firebaseConfig.authDomain && firebaseConfig.projectId && firebaseConfig.appId);
+const games = { tap:'逮住大青蛙', merge:'合成大青蛙', flap:'青蛙起飞', puzzle:'青蛙2048', aim:'青蛙定位练习' };
+const routes = new Set(['suggestions','discussion','leaderboard','account']);
 const $ = selector => document.querySelector(selector);
-const el = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
-let db, auth, firestore, currentGame = 'tap', playerName = '', threadsCursor = null, loadingThreads = false;
-
-const section = el('section', 'community-section');
-section.id = 'community';
-section.innerHTML = `<div class="community-heading"><span class="eyebrow">THE FROG CLUB</span><h2>青蛙俱乐部</h2><p>聊聊玩法，也看看谁是今天的榜一。</p></div><div class="community-identity"><label for="frog-name">你的昵称</label><input id="frog-name" maxlength="20" autocomplete="nickname" placeholder="取个好记的名字"><span id="frog-connection" role="status"></span></div><div class="community-columns"><section class="community-panel" aria-labelledby="board-title"><div class="community-panel-head"><div><span class="eyebrow">SAY HELLO</span><h3 id="board-title">意见留言</h3></div><button class="community-refresh" id="threads-refresh" type="button">刷新</button></div><form id="thread-form"><label for="thread-body">你的想法</label><textarea id="thread-body" rows="3" maxlength="500" placeholder="想说点什么？玩法建议、吐槽都欢迎。" required></textarea><div class="community-form-foot"><span>最多 500 字，公开可见</span><button type="submit">发布留言 ↗</button></div></form><p class="community-status" id="threads-status" role="status"></p><div id="thread-list" class="thread-list"></div><button id="threads-more" class="community-more" type="button" hidden>加载更多留言</button></section><section class="community-panel" aria-labelledby="rank-title"><div class="community-panel-head"><div><span class="eyebrow">HIGH SCORE CLUB</span><h3 id="rank-title">游戏排行榜</h3></div><button class="community-refresh" id="rank-refresh" type="button">刷新</button></div><div id="rank-tabs" class="rank-tabs" role="group" aria-label="选择游戏"></div><p class="community-status" id="rank-status" role="status"></p><ol id="rank-list" class="rank-list"></ol><div id="my-rank" class="my-rank">玩完一局，就能看到自己的排名。</div><p class="rank-note">每位玩家每款游戏只记录最高分；并列分数同名次。</p></section></div>`;
-$('#lobby .bottom-note').before(section);
-const gameRank = el('section', 'game-rank');
-gameRank.innerHTML = `<div><span class="eyebrow">YOUR PLACE</span><strong>本游戏排行榜</strong><p id="game-rank-summary">玩完一局，来看看自己的位置。</p></div><a href="#community">查看完整排行榜 ↗</a>`;
-$('#game-screen .play-footer').before(gameRank);
-const navLink = el('a', '', '留言板'); navLink.href = '#community'; $('#sound-toggle').before(navLink);
-const nameInput = $('#frog-name');
-try { nameInput.value = localStorage.getItem('sweetfrog-player-name') || ''; } catch {}
-nameInput.addEventListener('change', async () => {
-  playerName = nameInput.value.trim().replace(/\s+/g, ' ').slice(0, 20); nameInput.value = playerName;
-  try { localStorage.setItem('sweetfrog-player-name', playerName); } catch {}
-  if (!db || !auth?.currentUser || !playerName) return;
-  try {
-    await Promise.all(Object.keys(games).map(async game => {
-      const ref = firestore.doc(db, 'leaderboards', game, 'players', auth.currentUser.uid);
-      if ((await firestore.getDoc(ref)).exists()) await firestore.updateDoc(ref, { name: playerName, updatedAt: firestore.serverTimestamp() });
-    }));
-    await loadRank();
-  } catch (error) { status('#rank-status', errorMessage(error)); }
-});
-function name() { return nameInput.value.trim().replace(/\s+/g, ' ').slice(0, 20); }
-function status(selector, message) { $(selector).textContent = message; }
-function errorMessage(error) { console.warn('Sweetfrog community:', error); return '暂时连接不上，请稍后重试。'; }
-function timeLabel(timestamp) { const date = timestamp?.toDate?.(); return date ? new Intl.DateTimeFormat('zh-CN', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' }).format(date) : '刚刚'; }
-function button(text, onClick, className = '') { const control = el('button', className, text); control.type = 'button'; control.addEventListener('click', onClick); return control; }
-function setReady(enabled) { for (const selector of ['#thread-form button', '#threads-refresh', '#rank-refresh']) $(selector).disabled = !enabled; }
-setReady(false);
-
-for (const [key, label] of Object.entries(games)) {
-  const tab = button(label, () => { currentGame = key; updateTabs(); loadRank(); }, 'rank-tab');
-  tab.dataset.game = key; $('#rank-tabs').append(tab);
+const el = (tag,className,text) => { const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node; };
+const makeButton = (label,onClick,className='') => { const node=el('button',className,label);node.type='button';node.addEventListener('click',onClick);return node; };
+const page = el('main','club-page'); page.id='club-page';page.hidden=true;
+page.innerHTML=`<nav class="club-breadcrumb" aria-label="当前位置"><a href="#games">← 游戏大厅</a><span id="club-location"></span></nav><div id="club-content"></div>`;
+$('#game-screen').before(page);
+const nav=$('.site-header nav');
+for(const [route,label] of [['suggestions','意见留言'],['discussion','玩家社区'],['leaderboard','排行榜'],['account','登录 / 注册']]){const link=el('a','club-nav-link',label);link.href='#'+route;link.dataset.clubNav=route;nav.insertBefore(link,$('#sound-toggle'));}
+const rankLink=el('a','game-rank-link','查看本游戏排行榜 ↗');rankLink.href='#leaderboard';$('#game-screen .play-footer').before(rankLink);
+let token='';try{token=localStorage.getItem('sweetfrog-session')||'';}catch{}
+let user=null,rankGame='tap',accountMode='login',returnTo='games';
+const friendlyError=error=>error.message||'暂时连接不上服务器，请稍后重试。';
+async function request(path,options={}){
+  return communityRequest(path,options,token);
 }
-function updateTabs() { document.querySelectorAll('.rank-tab').forEach(tab => { const selected = tab.dataset.game === currentGame; tab.classList.toggle('selected', selected); tab.setAttribute('aria-pressed', String(selected)); }); }
-updateTabs();
-
-async function loadRank() {
-  if (!db) return;
-  const selectedGame = currentGame;
-  status('#rank-status', '正在读取排行榜…'); $('#rank-list').replaceChildren();
-  try {
-    const collection = firestore.collection(db, 'leaderboards', selectedGame, 'players');
-    const [top, mine] = await Promise.all([
-      firestore.getDocs(firestore.query(collection, firestore.orderBy('score', 'desc'), firestore.limit(20))),
-      firestore.getDoc(firestore.doc(collection, auth.currentUser.uid))
-    ]);
-    if (selectedGame !== currentGame) return;
-    let lastScore = null, place = 0, index = 0;
-    for (const row of top.docs) {
-      index++; const data = row.data(); if (data.score !== lastScore) place = index; lastScore = data.score;
-      const item = el('li', row.id === auth.currentUser.uid ? 'is-me' : '');
-      item.append(el('span', 'rank-place', String(place).padStart(2, '0')), el('span', 'rank-name', data.name || '青蛙玩家'), el('strong', 'rank-score', `${data.score} 分`));
-      $('#rank-list').append(item);
-    }
-    status('#rank-status', top.empty ? '还没有成绩，来当第一个上榜的玩家！' : '');
-    if (!mine.exists()) { $('#my-rank').textContent = '你还没有上榜，完成一局后自动记录成绩。'; return; }
-    const own = mine.data();
-    const ahead = await firestore.getCountFromServer(firestore.query(collection, firestore.where('score', '>', own.score)));
-    if (selectedGame !== currentGame) return;
-    const rankText = `你的排名：第 ${ahead.data().count + 1} 名 · ${own.score} 分`;
-    $('#my-rank').textContent = rankText; $('#game-rank-summary').textContent = rankText;
-  } catch (error) { status('#rank-status', errorMessage(error)); }
+async function refreshSession(){if(!token){user=null;return;}try{user=(await request('/api/session')).user;if(!user)clearSession();}catch{user=null;}}
+function clearSession(){token='';user=null;try{localStorage.removeItem('sweetfrog-session');}catch{}}
+function syncAdminLink(){let link=$('#admin-nav-link');if(user?.role==='admin'&&!link){link=el('a','club-nav-link','管理后台');link.id='admin-nav-link';link.href='./admin.html';$('#sound-toggle').before(link);}else if(user?.role!=='admin')link?.remove();}
+function saveSession(data){token=data.token;user=data.user;try{localStorage.setItem('sweetfrog-session',token);}catch{}syncAdminLink();}
+function heading(eyebrow,title,description){const wrap=el('div','club-heading');wrap.innerHTML=`<span class="eyebrow"></span><h1></h1><p></p>`;wrap.querySelector('.eyebrow').textContent=eyebrow;wrap.querySelector('h1').textContent=title;wrap.querySelector('p').textContent=description;return wrap;}
+function notice(message){return el('p','club-notice',message);}
+function time(value){const date=new Date(value.replace(' ','T')+'Z');return Number.isNaN(date.getTime())?'刚刚':new Intl.DateTimeFormat('zh-CN',{month:'numeric',day:'numeric'}).format(date);}
+function gate(message){const wrap=el('div','club-gate');wrap.append(el('p','',message));const link=el('a','club-action','登录 / 注册 ↗');link.href='#account';link.addEventListener('click',()=>{returnTo=location.hash.slice(1)||'games';});wrap.append(link);return wrap;}
+function form(label,max,submit){const node=el('form','club-form');node.innerHTML=`<label>标题<input name="title" required></label><label>内容<textarea name="body" required rows="4"></textarea></label><button type="submit"></button><p class="club-form-status" role="status"></p>`;node.querySelector('[name=title]').maxLength=80;node.querySelector('[name=body]').maxLength=max;node.querySelector('button').textContent=label;node.addEventListener('submit',async event=>{event.preventDefault();const button=node.querySelector('button'),status=node.querySelector('[role=status]');button.disabled=true;status.textContent='正在发布…';try{await submit({title:node.elements.title.value.trim(),body:node.elements.body.value.trim()});node.reset();status.textContent='发布成功！';await renderCurrent();}catch(error){status.textContent=friendlyError(error);}finally{button.disabled=false;}});return node;}
+function cardHead(item){const head=el('div','club-card-head');head.append(el('strong','',item.username),el('time','',time(item.createdAt)));return head;}
+async function suggestions(content){
+  content.append(heading('YOUR IDEAS','意见留言','留下建议，给喜欢的提议点个赞。点赞越多，排得越靠前。'));
+  if(user)content.append(form('发布提议 ↗',500,data=>request('/api/suggestions',{method:'POST',body:JSON.stringify(data)})));
+  else content.append(gate('游客可以浏览提议；登录后可以发布和点赞。'));
+  const list=el('div','club-list');content.append(list);list.append(notice('正在读取提议…'));
+  try{const {items}=await request('/api/suggestions');list.replaceChildren();if(!items.length)list.append(notice('还没有提议，来发布第一条吧。'));
+    for(const item of items){const card=el('article','club-card');const vote=makeButton(`▲ ${item.votes}`,async()=>{if(!user){returnTo='suggestions';location.hash='account';return;}vote.disabled=true;try{await request(`/api/suggestions/${item.id}/vote`,{method:'POST'});await renderCurrent();}catch(error){vote.disabled=false;card.append(notice(friendlyError(error)));}},'vote-button');vote.disabled=Boolean(item.voted);vote.setAttribute('aria-label',`为“${item.title}”点赞，当前 ${item.votes} 赞`);if(item.voted)vote.title='你已经点过赞';const body=el('div','club-card-content');body.append(cardHead(item),el('h2','',item.title),el('p','',item.body));card.append(vote,body);list.append(card);}
+  }catch(error){list.replaceChildren(notice(friendlyError(error)));}
 }
-$('#rank-refresh').addEventListener('click', loadRank);
-
-async function sendScore({ game, score }) {
-  if (!db || !games[game] || !Number.isSafeInteger(score) || score < 0 || score > 10000000) return;
-  try {
-    const ref = firestore.doc(db, 'leaderboards', game, 'players', auth.currentUser.uid);
-    await firestore.runTransaction(db, async tx => {
-      const old = await tx.get(ref);
-      if (!old.exists() || score > old.data().score) tx.set(ref, { name: name() || `青蛙玩家${auth.currentUser.uid.slice(0, 4)}`, score, updatedAt: firestore.serverTimestamp() });
-    });
-    if (currentGame === game) await loadRank();
-  } catch (error) { status('#rank-status', errorMessage(error)); }
+async function discussion(content){
+  content.append(heading('FRIENDS TALK','玩家社区','分享玩法、挑战记录和新点子。游客可以围观，登录后加入讨论。'));
+  if(user)content.append(form('发布话题 ↗',2000,data=>request('/api/topics',{method:'POST',body:JSON.stringify(data)})));
+  else content.append(gate('游客可以阅读话题与回复；登录后可以发帖和回复。'));
+  const list=el('div','club-list');content.append(list);list.append(notice('正在读取话题…'));
+  try{const {items}=await request('/api/topics');list.replaceChildren();if(!items.length)list.append(notice('还没有话题，来发起第一场讨论吧。'));
+    for(const item of items){const card=el('article','club-card topic-card');const body=el('div','club-card-content');body.append(cardHead(item),el('h2','',item.title),el('p','',item.body));const replies=el('div','club-replies');replies.hidden=true;const toggle=makeButton(`查看回复 · ${item.replyCount}`,async()=>{if(!replies.hidden){replies.hidden=true;return;}replies.hidden=false;replies.replaceChildren(notice('正在读取回复…'));try{const data=await request(`/api/topics/${item.id}/replies`);replies.replaceChildren();if(!data.items.length)replies.append(notice('还没有回复。'));for(const reply of data.items){const row=el('div','club-reply');row.append(cardHead(reply),el('p','',reply.body));replies.append(row);}if(user){const replyForm=el('form','club-reply-form');const field=el('textarea');field.required=true;field.maxLength=1000;field.rows=2;field.placeholder='说说你的看法…';field.setAttribute('aria-label','回复内容');const send=el('button','','发送回复');send.type='submit';const response=el('p','club-form-status');replyForm.append(field,send,response);replyForm.addEventListener('submit',async event=>{event.preventDefault();send.disabled=true;try{await request(`/api/topics/${item.id}/replies`,{method:'POST',body:JSON.stringify({body:field.value.trim()})});field.value='';response.textContent='回复成功';const data=await request(`/api/topics/${item.id}/replies`);replies.replaceChildren(...data.items.map(reply=>{const row=el('div','club-reply');row.append(cardHead(reply),el('p','',reply.body));return row;}),replyForm);toggle.textContent=`查看回复 · ${data.items.length}`;}catch(error){response.textContent=friendlyError(error);}finally{send.disabled=false;}});replies.append(replyForm);}else replies.append(gate('登录后可以回复这条话题。'));}catch(error){replies.replaceChildren(notice(friendlyError(error)));}},'club-text-button');body.append(toggle,replies);card.append(body);list.append(card);}
+  }catch(error){list.replaceChildren(notice(friendlyError(error)));}
 }
-window.addEventListener('sweetfrog:finished', event => sendScore(event.detail));
-window.addEventListener('hashchange', () => { const game = location.hash.slice(1); if (games[game]) { currentGame = game; updateTabs(); if (db) loadRank(); } });
-
-function renderReply(data) {
-  const item = el('div', 'reply-item'); const head = el('div', 'thread-meta');
-  head.append(el('strong', '', data.name || '青蛙玩家'), el('time', '', timeLabel(data.createdAt)));
-  item.append(head, el('p', '', data.body || '')); return item;
+async function leaderboard(content){
+  content.append(heading('HIGH SCORE CLUB','游戏排行榜','五个游戏各有榜单。游客可以看，登录玩家完成一局后自动上榜。'));
+  const tabs=el('div','club-tabs');for(const [game,label] of Object.entries(games)){const tab=makeButton(label,()=>{rankGame=game;renderCurrent();},'club-tab');tab.classList.toggle('selected',game===rankGame);tab.setAttribute('aria-pressed',String(game===rankGame));tabs.append(tab);}content.append(tabs);
+  const list=el('ol','club-ranks');content.append(list);list.append(notice('正在读取成绩…'));
+  try{const data=await request(`/api/leaderboards/${rankGame}`);list.replaceChildren();if(!data.entries.length)list.append(notice('还没有玩家上榜，来拿第一名吧。'));
+    for(const entry of data.entries){const item=el('li','club-rank');item.append(el('span','club-rank-num',String(entry.rank).padStart(2,'0')),el('span','club-rank-name',entry.username),el('strong','club-rank-score',`${entry.score} 分`));list.append(item);}
+    content.append(el('div','club-my-rank',user?(data.self?`你的排名：第 ${data.self.rank} 名 · ${data.self.score} 分`:'你还未在这款游戏上榜，完成一局后自动提交。'):'游客可以看榜；注册登录后才能上榜。'));
+  }catch(error){list.replaceChildren(notice(friendlyError(error)));}
 }
-async function showReplies(threadId, area, trigger) {
-  trigger.disabled = true; area.textContent = '正在加载回复…';
-  try {
-    const rows = await firestore.getDocs(firestore.query(firestore.collection(db, 'threads', threadId, 'replies'), firestore.orderBy('createdAt'), firestore.limit(50)));
-    area.replaceChildren();
-    if (rows.empty) area.append(el('p', 'community-status', '还没有回复，来聊第一句吧。'));
-    for (const row of rows.docs) area.append(renderReply(row.data()));
-    const form = el('form', 'reply-form'); const input = el('textarea');
-    input.rows = 2; input.maxLength = 500; input.required = true; input.placeholder = '回复这条留言…'; input.setAttribute('aria-label', '回复内容');
-    const send = el('button', '', '发送回复'); send.type = 'submit'; form.append(input, send);
-    form.addEventListener('submit', async event => {
-      event.preventDefault(); const body = input.value.trim(); if (!body || !db) return;
-      send.disabled = true;
-      try { await firestore.addDoc(firestore.collection(db, 'threads', threadId, 'replies'), { uid: auth.currentUser.uid, name: name() || `青蛙玩家${auth.currentUser.uid.slice(0, 4)}`, body, createdAt: firestore.serverTimestamp() }); input.value = ''; await showReplies(threadId, area, trigger); }
-      catch (error) { area.prepend(el('p', 'community-status', errorMessage(error))); }
-      finally { send.disabled = false; }
-    });
-    area.append(form); trigger.textContent = '收起回复'; trigger.disabled = false;
-  } catch (error) { area.textContent = errorMessage(error); trigger.disabled = false; }
+function account(content){
+  content.append(heading('JOIN THE CLUB','玩家身份','注册后可以提议、点赞、讨论和上榜；也可以先以游客身份逛逛。'));
+  if(user){const card=el('div','account-card');card.append(el('h2','',`欢迎回来，${user.username}`),el('p','','你已登录，完成游戏后会自动记录最高分。'));if(user.role==='admin'){const link=el('a','club-action','进入管理后台 ↗');link.href='./admin.html';card.append(link);}card.append(makeButton('退出登录',async()=>{try{await request('/api/logout',{method:'POST'});}catch{}clearSession();syncAdminLink();renderCurrent();},'club-action'));content.append(card);return;}
+  const tabs=el('div','club-tabs');for(const [mode,label] of [['login','登录'],['register','注册']]){const tab=makeButton(label,()=>{accountMode=mode;renderCurrent();},'club-tab');tab.classList.toggle('selected',accountMode===mode);tabs.append(tab);}content.append(tabs);
+  const formNode=el('form','account-card account-form');formNode.innerHTML=`<label>玩家昵称<input name="username" autocomplete="username" minlength="3" maxlength="20" required></label><label>密码<input name="password" type="password" autocomplete="current-password" minlength="8" maxlength="128" required></label><button type="submit"></button><p role="status"></p>`;
+  formNode.querySelector('button').textContent=accountMode==='register'?'创建账号 ↗':'登录 ↗';formNode.querySelector('[name=password]').autocomplete=accountMode==='register'?'new-password':'current-password';
+  formNode.addEventListener('submit',async event=>{event.preventDefault();const button=formNode.querySelector('button'),status=formNode.querySelector('[role=status]');button.disabled=true;status.textContent='正在处理…';try{const data=await request('/api/'+accountMode,{method:'POST',body:JSON.stringify({username:formNode.elements.username.value.trim(),password:formNode.elements.password.value})});saveSession(data);location.hash=returnTo;returnTo='games';}catch(error){status.textContent=friendlyError(error);}finally{button.disabled=false;}});
+  content.append(formNode);const guest=el('a','guest-link','游客登录 · 先逛逛 →');guest.href='#games';content.append(guest);
 }
-function renderThread(row) {
-  const data = row.data(); const item = el('article', 'thread-item');
-  const head = el('div', 'thread-meta'); head.append(el('strong', '', data.name || '青蛙玩家'), el('time', '', timeLabel(data.createdAt)));
-  const area = el('div', 'reply-area'); area.hidden = true;
-  const replyButton = button('查看 / 回复', () => { if (area.hidden) { area.hidden = false; showReplies(row.id, area, replyButton); } else { area.hidden = true; replyButton.textContent = '查看 / 回复'; } }, 'reply-toggle');
-  item.append(head, el('p', '', data.body || ''), replyButton, area); return item;
-}
-async function loadThreads(reset = false) {
-  if (!db || loadingThreads) return;
-  loadingThreads = true; $('#threads-more').disabled = true;
-  if (reset) { threadsCursor = null; $('#thread-list').replaceChildren(); }
-  status('#threads-status', '正在读取留言…');
-  try {
-    const parts = [firestore.orderBy('createdAt', 'desc'), firestore.limit(15)];
-    if (threadsCursor) parts.splice(1, 0, firestore.startAfter(threadsCursor));
-    const rows = await firestore.getDocs(firestore.query(firestore.collection(db, 'threads'), ...parts));
-    rows.docs.forEach(row => $('#thread-list').append(renderThread(row)));
-    threadsCursor = rows.docs.at(-1) || null;
-    $('#threads-more').hidden = rows.size < 15;
-    status('#threads-status', $('#thread-list').children.length ? '' : '还没有留言，来留下第一句吧。');
-  } catch (error) { status('#threads-status', errorMessage(error)); }
-  finally { loadingThreads = false; $('#threads-more').disabled = false; }
-}
-$('#threads-refresh').addEventListener('click', () => loadThreads(true));
-$('#threads-more').addEventListener('click', () => loadThreads(false));
-$('#thread-form').addEventListener('submit', async event => {
-  event.preventDefault(); const body = $('#thread-body').value.trim(); if (!body || !db) return;
-  const submit = $('#thread-form button'); submit.disabled = true;
-  try { await firestore.addDoc(firestore.collection(db, 'threads'), { uid: auth.currentUser.uid, name: name() || `青蛙玩家${auth.currentUser.uid.slice(0, 4)}`, body, createdAt: firestore.serverTimestamp() }); $('#thread-body').value = ''; await loadThreads(true); }
-  catch (error) { status('#threads-status', errorMessage(error)); }
-  finally { submit.disabled = false; }
-});
-
-if (!configured) {
-  status('#frog-connection', '社区尚未连接云端，游戏仍可正常玩。');
-  status('#threads-status', '留言功能等待站点管理员完成云端配置。');
-  status('#rank-status', '排行榜等待站点管理员完成云端配置。');
-} else {
-  try {
-    const [appModule, authModule, dbModule] = await Promise.all([
-      import('https://www.gstatic.com/firebasejs/12.3.0/firebase-app.js'),
-      import('https://www.gstatic.com/firebasejs/12.3.0/firebase-auth.js'),
-      import('https://www.gstatic.com/firebasejs/12.3.0/firebase-firestore.js')
-    ]);
-    firestore = dbModule;
-    const app = appModule.initializeApp(firebaseConfig);
-    auth = authModule.getAuth(app); db = dbModule.getFirestore(app);
-    if (!auth.currentUser) await authModule.signInAnonymously(auth);
-    setReady(true); status('#frog-connection', '游客身份已连接。昵称只用于展示，换设备会重新生成身份。');
-    await Promise.all([loadThreads(true), loadRank()]);
-  } catch (error) {
-    db = null; status('#frog-connection', errorMessage(error));
-    status('#threads-status', '留言暂时不可用。'); status('#rank-status', '排行榜暂时不可用。');
-  }
-}
+async function renderCurrent(){const route=location.hash.slice(1),visible=routes.has(route);page.hidden=!visible;if(!visible)return;$('#lobby').hidden=true;$('#game-screen').hidden=true;const content=el('div');content.id='club-content';$('#club-content').replaceWith(content);$('#club-location').textContent={suggestions:'意见留言',discussion:'玩家社区',leaderboard:'排行榜',account:'登录 / 注册'}[route];document.querySelectorAll('[data-club-nav]').forEach(link=>link.classList.toggle('active',link.dataset.clubNav===route));if(route==='suggestions')await suggestions(content);else if(route==='discussion')await discussion(content);else if(route==='leaderboard')await leaderboard(content);else account(content);}
+window.addEventListener('hashchange',renderCurrent);
+window.addEventListener('sweetfrog:finished',async event=>{if(!user)return;const {game,score}=event.detail;if(!games[game])return;try{await request(`/api/leaderboards/${game}`,{method:'POST',body:JSON.stringify({score})});}catch(error){console.warn('成绩提交失败:',friendlyError(error));}});
+await refreshSession();syncAdminLink();renderCurrent();

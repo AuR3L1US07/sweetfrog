@@ -2,21 +2,21 @@
 
 五款原创实现的浏览器小游戏：逮住大青蛙、合成大青蛙、青蛙起飞、青蛙2048、青蛙定位练习。
 
-## 留言与排行榜云端配置
+## 玩家账号与社区
 
-网站使用 Firebase Authentication 的游客身份和 Cloud Firestore 保存公开留言、回复及五款游戏的最高分。仓库中的 `firebase-config.js` 初始为空；配置前社区界面会显示未连接状态，游戏照常运行。
+网站有独立的意见留言、玩家社区、排行榜三个页面。注册使用玩家昵称和密码；游客可浏览提议、话题和排行榜，登录后才能发布提议、为每条提议点赞一次、发帖回复以及在每款游戏完成后上榜。服务端用 SQLite 保存数据，密码以随机盐和 scrypt 哈希保存，登录令牌在数据库中只存哈希。
 
-1. 在 [Firebase 控制台](https://console.firebase.google.com/) 新建项目并注册 Web 应用，复制 Web 应用配置中的 `apiKey`、`authDomain`、`projectId`、`appId` 到 `firebase-config.js`。
-2. 在 Authentication → Sign-in method 启用 **Anonymous**。
-3. 创建 Cloud Firestore 数据库，将 `firestore.rules` 内容发布到 Firestore 的 Rules 页面。
-4. 在 Authentication → Settings → Authorized domains 中确认 `aur3l1us07.github.io` 已获授权。
-5. 在 GitHub Pages 上打开网站，测试游客留言、回复、五个排行榜以及自己的名次。
+本地开发需要 Node.js 24：运行 `node server/server.mjs`，访问 `http://127.0.0.1:4175/`。数据默认在 `data/sweetfrog.sqlite`，已被 Git 忽略；可用 `SWEETFROG_DB` 和 `PORT` 环境变量调整。不要把数据库或账号信息提交到 GitHub。
 
-昵称只用于展示。游客身份保存在浏览器中，清除浏览器数据或更换设备会成为新玩家。排行榜按每人每款游戏最高分计，分数相同显示并列名次。由于游戏在浏览器本地运行，客户端成绩无法防止有意伪造；这是朋友间娱乐排行，不适合有奖竞赛。公开留言可在 Firestore 控制台中管理。
+GitHub Pages 只能托管静态前端。正式启用账号和跨设备社区前，需要将 `server/server.mjs` 部署到支持持久磁盘与 Node.js 24 的 HTTPS 服务，并把其 URL 填到 `community-config.js` 的 `apiBaseUrl`。服务端的 `SWEETFROG_ORIGINS` 应包含网页域名。当前未配置线上 API 时，线上游戏仍可玩，但账号和社区页面会显示连接失败，不能保存在线数据。浏览器端提交的游戏成绩无法完全防伪，排行榜适合朋友间娱乐，不适合有奖竞赛。
+
+管理后台位于 `admin.html`。首次启动服务时设置 `SWEETFROG_ADMIN_USER` 和 `SWEETFROG_ADMIN_PASSWORD`（至少 12 位），服务会创建管理员账号；之后使用该账号在网站登录。管理员可以查看总览、提议、话题与回复、排行榜及账号列表，删除不当内容和异常成绩，并停用或恢复普通玩家账号。不要把管理员密码提交到仓库，也不要把 SQLite 数据库提交或上传到 GitHub Pages。后台 API 会独立校验管理员身份，普通玩家无法通过直接请求调用。
+
+未来接入 Firebase 时，保留了 `firebase-config.js` 与 `firebase-adapter.js` 接口。前端统一通过 `community-transport.js` 读取数据；完成适配器实现与 Firebase 安全规则后，可将 `community-config.js` 的 `provider` 改为 `firebase`。当前 Firebase 适配器尚未启用，切换前必须实现注册登录、唯一点赞和管理员授权，不能仅靠网页界面判断权限。
 
 ## 使用
 
-使用静态服务器打开项目，例如 `python -m http.server 4173`，访问 `http://localhost:4173`。GitHub Pages 从 `main` 分支根目录自动发布。
+纯游戏可以用静态服务器打开，例如 `python -m http.server 4173`；需测试账号与社区时请使用上面的 Node 服务。GitHub Pages 从 `main` 分支根目录自动发布。
 
 - 点击挑战：点击最底行头像，或按 D / F / J / K，限时 30 秒；误点扣 2 秒。
 - 合成大青蛙：移动选择落点并点击 / 松手投放；键盘左右移动、空格投放。相同等级合并，等级以色框和数字区分。超过警戒线持续 2 秒结束。
