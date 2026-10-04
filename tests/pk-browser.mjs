@@ -57,6 +57,8 @@ try {
   await guestPage.locator('#pk-game').waitFor({state:'visible',timeout:10000});
   assert.ok((await hostPage.locator('#pk-board').boundingBox()).height < 520);
   assert.ok((await guestPage.locator('#pk-board').boundingBox()).height < 420);
+  await hostPage.waitForFunction(()=>{const box=document.querySelector('#pk-game').getBoundingClientRect();return box.top>=-10&&box.top<innerHeight*.5;});
+  await guestPage.waitForFunction(()=>{const box=document.querySelector('#pk-game').getBoundingClientRect();return box.top>=-10&&box.top<innerHeight*.5;});
   await hostPage.screenshot({path:'tests/pk-desktop-preview.png',fullPage:true});
   await guestPage.screenshot({path:'tests/pk-mobile-preview.png',fullPage:true});
   await hostPage.locator('.pk-row:last-child .pk-cell.face').click();
@@ -65,6 +67,19 @@ try {
   await guestPage.reload();
   await guestPage.getByText(host.user.username).waitFor();
   assert.equal(await guestPage.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  execFileSync(process.execPath,[cli,'d1','execute','sweetfrog-db','--local','--persist-to',state,'--command',`UPDATE pk_rooms SET starts_at=${Date.now()-33000} WHERE code='${code}'`],{cwd:root,stdio:'pipe'});
+  await hostPage.locator('#pk-result.is-win').waitFor({state:'visible',timeout:10000});
+  await guestPage.locator('#pk-result.is-lose').waitFor({state:'visible',timeout:10000});
+  await hostPage.screenshot({path:'tests/pk-result-win-preview.png',fullPage:true});
+  await guestPage.screenshot({path:'tests/pk-result-lose-mobile-preview.png',fullPage:true});
+  await hostPage.getByRole('button',{name:'不服？再来一局'}).click();
+  await guestPage.getByRole('button',{name:'同意，再来一局 →'}).waitFor();
+  await guestPage.getByRole('button',{name:'同意，再来一局 →'}).click();
+  await hostPage.getByText('准备开局 ·').waitFor({timeout:8000});
+  await hostPage.locator('#pk-game').waitFor({state:'visible',timeout:10000});
+  await guestPage.locator('#pk-game').waitFor({state:'visible',timeout:10000});
+  assert.equal(await hostPage.locator('.pk-player-score').first().textContent(),'0');
+  assert.equal(await guestPage.locator('.pk-player-score').first().textContent(),'0');
   for(const [game,title] of [['merge','合成大青蛙'],['flap','青蛙起飞'],['puzzle','青蛙2048'],['aim','青蛙定位练习']]){
     await hostPage.goto(base+'/#pk');
     await hostPage.locator(`.pk-game-option input[value="${game}"]`).check();
@@ -81,7 +96,7 @@ try {
     if(game==='aim')await guestPage.screenshot({path:'tests/pk-aim-mobile-preview.png',fullPage:true});
     if(game==='merge')await hostPage.locator('#game-stage canvas').click();
     if(game==='flap')await hostPage.locator('#game-stage canvas').click();
-    if(game==='puzzle')for(const key of ['ArrowLeft','ArrowDown','ArrowRight'])await hostPage.keyboard.press(key);
+    if(game==='puzzle')for(let step=0;step<24&&Number(await hostPage.locator('#score').textContent())===0;step++)await hostPage.keyboard.press(['ArrowLeft','ArrowDown','ArrowRight','ArrowUp'][step%4]);
     if(game==='aim')await hostPage.locator('.aim-target').click();
     if(['puzzle','aim'].includes(game)){
       await hostPage.waitForFunction(()=>Number(document.querySelector('#score').textContent)>0);
@@ -89,7 +104,7 @@ try {
     }
   }
   assert.deepEqual(errors,[]);
-  console.log('PASS: two browsers create/join, all five game choices, countdown, live score, refresh recovery, mobile layout');
+  console.log('PASS: two browsers create/join, all five games, rematch consent, result animation state, auto focus, live score, mobile layout');
 } finally {
   await browser?.close();
   if(server){const stopped=new Promise(resolve=>server.once('exit',resolve));server.kill();await stopped;}

@@ -144,12 +144,12 @@ export async function handleApi(request, env) {
       }
     }
 
-    const roomPath=/^\/api\/pk\/rooms\/([A-HJ-NP-Z2-9]{6})(?:\/(join|ready|hit|score))?$/.exec(path);
+    const roomPath=/^\/api\/pk\/rooms\/([A-HJ-NP-Z2-9]{6})(?:\/(join|ready|hit|score|rematch))?$/.exec(path);
     const roomQuery=`SELECT r.*,h.username AS host_name,g.username AS guest_name FROM pk_rooms r JOIN users h ON h.id=r.host_id LEFT JOIN users g ON g.id=r.guest_id WHERE r.code=?`;
     const getRoom=code=>first(roomQuery,code);
     function roomState(room,now=Date.now()) {
       const phase=!room.guest_id?'waiting':!room.starts_at?'ready':now<room.starts_at?'countdown':now<room.starts_at+PK_DURATION_MS?'playing':'finished';
-      return {code:room.code,game:room.game,phase,serverNow:now,startsAt:room.starts_at,endsAt:room.starts_at?room.starts_at+PK_DURATION_MS:null,seed:room.seed,host:{id:room.host_id,name:room.host_name,ready:Boolean(room.host_ready),score:room.host_score,seq:room.host_seq},guest:room.guest_id?{id:room.guest_id,name:room.guest_name,ready:Boolean(room.guest_ready),score:room.guest_score,seq:room.guest_seq}:null,winnerId:phase==='finished'?(room.host_score===room.guest_score?null:room.host_score>room.guest_score?room.host_id:room.guest_id):null,rows:room.game==='tap'?pkRows(room.seed,user?.id===room.host_id?room.host_score:room.guest_score):null};
+      return {code:room.code,game:room.game,round:room.round,revision:room.revision,rematchBy:room.rematch_by,phase,serverNow:now,startsAt:room.starts_at,endsAt:room.starts_at?room.starts_at+PK_DURATION_MS:null,seed:room.seed,host:{id:room.host_id,name:room.host_name,ready:Boolean(room.host_ready),score:room.host_score,seq:room.host_seq},guest:room.guest_id?{id:room.guest_id,name:room.guest_name,ready:Boolean(room.guest_ready),score:room.guest_score,seq:room.guest_seq}:null,winnerId:phase==='finished'?(room.host_score===room.guest_score?null:room.host_score>room.guest_score?room.host_id:room.guest_id):null,rows:room.game==='tap'?pkRows(room.seed,user?.id===room.host_id?room.host_score:room.guest_score):null};
     }
     if(method==='POST' && path==='/api/pk/rooms') {
       requireUser();await rate(`pk-create:${user.id}`,12);
@@ -186,30 +186,53 @@ export async function handleApi(request, env) {
         await run('UPDATE pk_rooms SET starts_at=? WHERE code=? AND host_ready=1 AND guest_ready=1 AND starts_at IS NULL',now+3500,code);
         return json({room:roomState(await getRoom(code))});
       }
+      if(action==='rematch'&&method==='POST'){
+        const decision=(await body(request)).decision,now=Date.now();
+        if(!['request','accept','cancel'].includes(decision))fail(400,'请选择有效操作');
+        if(!room.guest_id||!room.starts_at||now<room.starts_at+PK_DURATION_MS+1200)fail(409,'请等待本局成绩结算');
+        let result;
+        if(decision==='request'){
+          result=await run('UPDATE pk_rooms SET rematch_by=?,revision=revision+1 WHERE code=? AND round=? AND rematch_by IS NULL AND starts_at+?<=?',user.id,code,room.round,PK_DURATION_MS+1200,now);
+          if(!result.meta.changes){
+            const current=await getRoom(code);
+            if(current.round!==room.round||current.rematch_by!==user.id)fail(409,'房间状态已更新，请刷新后重试');
+          }
+        }else if(decision==='cancel'){
+          result=await run('UPDATE pk_rooms SET rematch_by=NULL,revision=revision+1 WHERE code=? AND round=? AND rematch_by=?',code,room.round,user.id);
+          if(!result.meta.changes)fail(409,'没有可撤回的邀约');
+        }else{
+          const seed=crypto.getRandomValues(new Uint32Array(1))[0];
+          result=await run('UPDATE pk_rooms SET round=round+1,revision=revision+1,rematch_by=NULL,host_ready=1,guest_ready=1,host_score=0,guest_score=0,host_seq=0,guest_seq=0,host_last_hit=0,guest_last_hit=0,seed=?,starts_at=? WHERE code=? AND round=? AND rematch_by IS NOT NULL AND rematch_by<>? AND starts_at+?<=?',seed,now+3500,code,room.round,user.id,PK_DURATION_MS+1200,now);
+          if(!result.meta.changes)fail(409,'邀约已失效，请刷新房间');
+        }
+        return json({room:roomState(await getRoom(code))});
+      }
       if(action==='hit'&&method==='POST'){
         if(room.game!=='tap')fail(400,'此游戏不使用点格模式');
-        const data=await body(request),col=data.col,step=data.step,now=Date.now();
-        if(!Number.isInteger(col)||col<0||col>3||!Number.isInteger(step)||step<0||step>300)fail(400,'操作无效');
+        const data=await body(request),col=data.col,step=data.step,round=data.round,now=Date.now();
+        if(!Number.isInteger(col)||col<0||col>3||!Number.isInteger(step)||step<0||step>300||!Number.isSafeInteger(round)||round<1)fail(400,'操作无效');
+        if(round!==room.round)fail(409,'这次点击属于上一局');
         if(!room.starts_at||now<room.starts_at||now>room.starts_at+PK_DURATION_MS+1200)fail(409,'本局尚未开始或已经结束');
         const isHost=user.id===room.host_id,scoreColumn=isHost?'host_score':'guest_score',lastColumn=isHost?'host_last_hit':'guest_last_hit';
         const current=room[scoreColumn];
         if(step!==current)fail(409,'成绩已更新，请同步房间');
         if(now-room[lastColumn]<45)fail(429,'点击太快，请稍等片刻');
         if(pkRows(room.seed,current)[4]!==col)return json({correct:false,room:roomState(room)});
-        const result=await run(`UPDATE pk_rooms SET ${scoreColumn}=${scoreColumn}+1,${lastColumn}=? WHERE code=? AND ${scoreColumn}=? AND starts_at<=? AND starts_at+? >=?`,now,code,current,now,PK_DURATION_MS+1200,now);
+        const result=await run(`UPDATE pk_rooms SET ${scoreColumn}=${scoreColumn}+1,${lastColumn}=? WHERE code=? AND round=? AND ${scoreColumn}=? AND starts_at<=? AND starts_at+? >=?`,now,code,round,current,now,PK_DURATION_MS+1200,now);
         if(!result.meta.changes)fail(409,'成绩已更新，请同步房间');
         room=await getRoom(code);
         return json({correct:true,room:roomState(room)});
       }
       if(action==='score'&&method==='POST'){
         if(room.game==='tap')fail(400,'点格模式需要逐次命中');
-        const data=await body(request),value=data.score,seq=data.seq,now=Date.now();
+        const data=await body(request),value=data.score,seq=data.seq,round=data.round,now=Date.now();
         const caps={merge:1000000,flap:50,puzzle:1000000,aim:1000000};
-        if(!Number.isSafeInteger(value)||value<0||value>caps[room.game]||!Number.isSafeInteger(seq)||seq<1||seq>10000)fail(400,'成绩无效');
+        if(!Number.isSafeInteger(value)||value<0||value>caps[room.game]||!Number.isSafeInteger(seq)||seq<1||seq>10000||!Number.isSafeInteger(round)||round<1)fail(400,'成绩无效');
+        if(round!==room.round)fail(409,'这份成绩属于上一局');
         if(!room.starts_at||now<room.starts_at||now>room.starts_at+PK_DURATION_MS+1200)fail(409,'本局尚未开始或已经结束');
         const isHost=user.id===room.host_id,scoreColumn=isHost?'host_score':'guest_score',seqColumn=isHost?'host_seq':'guest_seq';
         if(seq<=room[seqColumn])return json({ok:true,room:roomState(room)});
-        await run(`UPDATE pk_rooms SET ${scoreColumn}=?,${seqColumn}=? WHERE code=? AND ${seqColumn}<? AND starts_at<=? AND starts_at+? >=?`,value,seq,code,seq,now,PK_DURATION_MS+1200,now);
+        await run(`UPDATE pk_rooms SET ${scoreColumn}=?,${seqColumn}=? WHERE code=? AND round=? AND ${seqColumn}<? AND starts_at<=? AND starts_at+? >=?`,value,seq,code,round,seq,now,PK_DURATION_MS+1200,now);
         return json({ok:true,room:roomState(await getRoom(code))});
       }
       fail(405,'请求方法不支持');

@@ -81,13 +81,24 @@ try {
   assert.ok(started.startsAt>started.serverNow);
   await new Promise(resolve=>setTimeout(resolve,3650));
   const target=pkRows(started.seed,0)[4];
-  assert.equal((await call(`/api/pk/rooms/${code}/hit`,'POST',{col:(target+1)%4,step:0},token))[1].correct,false);
-  assert.equal((await call(`/api/pk/rooms/${code}/hit`,'POST',{col:target,step:0},token))[1].room.host.score,1);
-  assert.equal((await call(`/api/pk/rooms/${code}/hit`,'POST',{col:target,step:0},token))[0],409);
+  assert.equal((await call(`/api/pk/rooms/${code}/hit`,'POST',{col:(target+1)%4,step:0,round:1},token))[1].correct,false);
+  assert.equal((await call(`/api/pk/rooms/${code}/hit`,'POST',{col:target,step:0,round:1},token))[1].room.host.score,1);
+  assert.equal((await call(`/api/pk/rooms/${code}/hit`,'POST',{col:target,step:0,round:1},token))[0],409);
+  assert.equal((await call(`/api/pk/rooms/${code}/rematch`,'POST',{decision:'request'},token))[0],409);
   wrangler(['d1','execute','sweetfrog-db','--local','--persist-to',state,'--command',`UPDATE pk_rooms SET starts_at=${Date.now()-31000} WHERE code='${code}'`]);
   const finished=(await call(`/api/pk/rooms/${code}`,'GET',undefined,token))[1].room;
   assert.equal(finished.phase,'finished');
   assert.equal(finished.winnerId,player.user.id);
+  wrangler(['d1','execute','sweetfrog-db','--local','--persist-to',state,'--command',`UPDATE pk_rooms SET starts_at=${Date.now()-33000} WHERE code='${code}'`]);
+  assert.equal((await call(`/api/pk/rooms/${code}/rematch`,'POST',{decision:'accept'},admin.token))[0],409);
+  assert.equal((await call(`/api/pk/rooms/${code}/rematch`,'POST',{decision:'request'},token))[1].room.rematchBy,player.user.id);
+  assert.equal((await call(`/api/pk/rooms/${code}/rematch`,'POST',{decision:'accept'},token))[0],409);
+  assert.equal((await call(`/api/pk/rooms/${code}/rematch`,'POST',{decision:'cancel'},token))[1].room.rematchBy,null);
+  assert.equal((await call(`/api/pk/rooms/${code}/rematch`,'POST',{decision:'request'},admin.token))[1].room.rematchBy,admin.user.id);
+  const rematched=(await call(`/api/pk/rooms/${code}/rematch`,'POST',{decision:'accept'},token))[1].room;
+  assert.equal(rematched.round,2);assert.equal(rematched.phase,'countdown');assert.equal(rematched.host.score,0);assert.equal(rematched.guest.score,0);
+  assert.notEqual(rematched.seed,started.seed);
+  assert.equal((await call(`/api/pk/rooms/${code}/hit`,'POST',{col:target,step:0,round:1},token))[0],409);
   assert.equal((await call('/api/pk/rooms','POST',{game:'unknown'},token))[0],400);
   for(const game of ['merge','flap','puzzle','aim']){
     const [createdStatus,chosen]=await call('/api/pk/rooms','POST',{game},token);
@@ -98,10 +109,10 @@ try {
     await call(`/api/pk/rooms/${chosenCode}/ready`,'POST',{},token);
     await call(`/api/pk/rooms/${chosenCode}/ready`,'POST',{},admin.token);
     wrangler(['d1','execute','sweetfrog-db','--local','--persist-to',state,'--command',`UPDATE pk_rooms SET starts_at=${Date.now()-1000} WHERE code='${chosenCode}'`]);
-    assert.equal((await call(`/api/pk/rooms/${chosenCode}/score`,'POST',{score:12,seq:1},token))[1].room.host.score,12);
-    assert.equal((await call(`/api/pk/rooms/${chosenCode}/score`,'POST',{score:7,seq:2},token))[1].room.host.score,7);
-    assert.equal((await call(`/api/pk/rooms/${chosenCode}/score`,'POST',{score:50,seq:1},token))[1].room.host.score,7);
-    assert.equal((await call(`/api/pk/rooms/${chosenCode}/hit`,'POST',{col:0,step:0},token))[0],400);
+    assert.equal((await call(`/api/pk/rooms/${chosenCode}/score`,'POST',{score:12,seq:1,round:1},token))[1].room.host.score,12);
+    assert.equal((await call(`/api/pk/rooms/${chosenCode}/score`,'POST',{score:7,seq:2,round:1},token))[1].room.host.score,7);
+    assert.equal((await call(`/api/pk/rooms/${chosenCode}/score`,'POST',{score:50,seq:1,round:1},token))[1].room.host.score,7);
+    assert.equal((await call(`/api/pk/rooms/${chosenCode}/hit`,'POST',{col:0,step:0,round:1},token))[0],400);
   }
   assert.equal((await call('/api/admin/topics/1','DELETE',undefined,admin.token))[0],200);
   assert.equal((await call('/api/topics/1/replies'))[1].items.length,0);
