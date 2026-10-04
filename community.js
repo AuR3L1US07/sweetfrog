@@ -25,25 +25,70 @@ function heading(eyebrow,title,description){const wrap=el('div','club-heading');
 function notice(message){return el('p','club-notice',message);}
 function time(value){const date=new Date(value.replace(' ','T')+'Z');return Number.isNaN(date.getTime())?'刚刚':new Intl.DateTimeFormat('zh-CN',{month:'numeric',day:'numeric'}).format(date);}
 function gate(message){const wrap=el('div','club-gate');wrap.append(el('p','',message));const link=el('a','club-action','登录 / 注册 ↗');link.href='#account';link.addEventListener('click',()=>{returnTo=location.hash.slice(1)||'games';});wrap.append(link);return wrap;}
-function form(label,max,submit){const node=el('form','club-form');node.innerHTML=`<label>标题<input name="title" required></label><label>内容<textarea name="body" required rows="4"></textarea></label><button type="submit"></button><p class="club-form-status" role="status"></p>`;node.querySelector('[name=title]').maxLength=80;node.querySelector('[name=body]').maxLength=max;node.querySelector('button').textContent=label;node.addEventListener('submit',async event=>{event.preventDefault();const button=node.querySelector('button'),status=node.querySelector('[role=status]');button.disabled=true;status.textContent='正在发布…';try{await submit({title:node.elements.title.value.trim(),body:node.elements.body.value.trim()});node.reset();status.textContent='发布成功！';await renderCurrent();}catch(error){status.textContent=friendlyError(error);}finally{button.disabled=false;}});return node;}
+function form(label,max,submit,after){const node=el('form','club-form');node.innerHTML=`<label>标题<input name="title" required></label><label>内容<textarea name="body" required rows="4"></textarea></label><button type="submit"></button><p class="club-form-status" role="status"></p>`;node.querySelector('[name=title]').maxLength=80;node.querySelector('[name=body]').maxLength=max;node.querySelector('button').textContent=label;node.addEventListener('submit',async event=>{event.preventDefault();const button=node.querySelector('button'),status=node.querySelector('[role=status]');button.disabled=true;status.textContent='正在发布…';try{const result=await submit({title:node.elements.title.value.trim(),body:node.elements.body.value.trim()});node.reset();status.textContent='发布成功！';if(after)after(result);else await renderCurrent();}catch(error){status.textContent=friendlyError(error);}finally{button.disabled=false;}});return node;}
 function cardHead(item){const head=el('div','club-card-head');head.append(el('strong','',item.username),el('time','',time(item.createdAt)));return head;}
+function memberMark(name){const mark=el('span','club-avatar',Array.from(name||'?')[0]?.toUpperCase()||'?');mark.setAttribute('aria-hidden','true');return mark;}
+function postMeta(item){const meta=el('div','forum-meta');meta.append(memberMark(item.username),el('strong','',item.username),el('time','',time(item.createdAt)));return meta;}
+function sectionTop(content,type){
+  const isIdea=type==='suggestions';
+  content.append(heading(isIdea?'IDEA BOARD':'FROG FORUM',isIdea?'意见留言':'玩家社区',isIdea?'喜欢的建议，点个赞让它排到前面。':'聊游戏、晒成绩，或者发起一场新讨论。'));
+  const tabs=el('nav','forum-switch');tabs.setAttribute('aria-label','社区栏目');
+  for(const [route,label] of [['discussion','玩家社区'],['suggestions','意见留言']]){const link=el('a','forum-switch-link',label);link.href='#'+route;if(type===route){link.classList.add('active');link.setAttribute('aria-current','page');}tabs.append(link);}
+  content.append(tabs);
+}
+function compose(content,type){
+  const isIdea=type==='suggestions';
+  const action=isIdea?'发布建议':'发布帖子';
+  const panel=el('section','forum-compose');
+  const top=el('div','forum-compose-head');top.append(el('div','forum-compose-symbol',isIdea?'✦':'#'),el('div','forum-compose-copy'));
+  top.lastChild.append(el('strong','',isIdea?'写一篇建议':'发一篇帖子'),el('p','',isIdea?'把想改进的地方讲清楚。':'把你想聊的话题发出来。'));
+  panel.append(top);
+  if(user){const editor=form(action+' ↗',isIdea?500:2000,data=>request(isIdea?'/api/suggestions':'/api/topics',{method:'POST',body:JSON.stringify(data)}),result=>{location.hash=(isIdea?'suggestions/':'discussion/')+result.id;});editor.querySelector('[name=title]').placeholder=isIdea?'用一句话概括建议':'给帖子起个标题';editor.querySelector('[name=body]').placeholder=isIdea?'具体希望怎样改进？':'写下你的想法…';panel.append(editor);}
+  else panel.append(gate(isIdea?'登录后可以发布建议和点赞。':'登录后可以发帖和回复。'));
+  content.append(panel);
+}
+function voteButton(item){
+  const vote=makeButton(`▲ ${item.votes}`,async()=>{
+    if(!user){returnTo=location.hash.slice(1);location.hash='account';return;}
+    vote.disabled=true;
+    try{const data=await request(`/api/suggestions/${item.id}/vote`,{method:'POST'});if(data.added){item.votes++;item.voted=1;vote.textContent=`▲ ${item.votes}`;vote.title='你已经点过赞';}else vote.title='你已经点过赞';}
+    catch(error){vote.disabled=false;vote.title=friendlyError(error);return;}
+  },'vote-button');
+  vote.disabled=Boolean(item.voted);vote.setAttribute('aria-label',`为“${item.title}”点赞，当前 ${item.votes} 赞`);
+  if(item.voted)vote.title='你已经点过赞';return vote;
+}
 async function suggestions(content){
-  content.append(heading('YOUR IDEAS','意见留言','留下建议，给喜欢的提议点个赞。点赞越多，排得越靠前。'));
-  if(user)content.append(form('发布提议 ↗',500,data=>request('/api/suggestions',{method:'POST',body:JSON.stringify(data)})));
-  else content.append(gate('游客可以浏览提议；登录后可以发布和点赞。'));
-  const list=el('div','club-list');content.append(list);list.append(notice('正在读取提议…'));
-  try{const {items}=await request('/api/suggestions');list.replaceChildren();if(!items.length)list.append(notice('还没有提议，来发布第一条吧。'));
-    for(const item of items){const card=el('article','club-card');const vote=makeButton(`▲ ${item.votes}`,async()=>{if(!user){returnTo='suggestions';location.hash='account';return;}vote.disabled=true;try{await request(`/api/suggestions/${item.id}/vote`,{method:'POST'});await renderCurrent();}catch(error){vote.disabled=false;card.append(notice(friendlyError(error)));}},'vote-button');vote.disabled=Boolean(item.voted);vote.setAttribute('aria-label',`为“${item.title}”点赞，当前 ${item.votes} 赞`);if(item.voted)vote.title='你已经点过赞';const body=el('div','club-card-content');body.append(cardHead(item),el('h2','',item.title),el('p','',item.body));card.append(vote,body);list.append(card);}
+  sectionTop(content,'suggestions');compose(content,'suggestions');
+  const bar=el('div','forum-list-bar');bar.append(el('h2','','建议列表'),el('span','','按点赞排序'));content.append(bar);
+  const list=el('div','club-list idea-list');content.append(list);list.append(notice('正在读取建议…'));
+  try{const {items}=await request('/api/suggestions');list.replaceChildren();if(!items.length)list.append(notice('还没有建议，来发布第一篇吧。'));
+    for(const item of items){const card=el('article','club-card idea-card');const body=el('div','club-card-content');const link=el('a','forum-title',item.title);link.href='#suggestions/'+item.id;body.append(postMeta(item),link,el('p','forum-excerpt',item.body));const footer=el('div','forum-row-footer');footer.append(el('span','','建议 · '+time(item.createdAt)),el('a','forum-open','查看建议 →'));footer.lastChild.href=link.href;body.append(footer);card.append(voteButton(item),body);list.append(card);}
   }catch(error){list.replaceChildren(notice(friendlyError(error)));}
 }
 async function discussion(content){
-  content.append(heading('FRIENDS TALK','玩家社区','分享玩法、挑战记录和新点子。游客可以围观，登录后加入讨论。'));
-  if(user)content.append(form('发布话题 ↗',2000,data=>request('/api/topics',{method:'POST',body:JSON.stringify(data)})));
-  else content.append(gate('游客可以阅读话题与回复；登录后可以发帖和回复。'));
-  const list=el('div','club-list');content.append(list);list.append(notice('正在读取话题…'));
-  try{const {items}=await request('/api/topics');list.replaceChildren();if(!items.length)list.append(notice('还没有话题，来发起第一场讨论吧。'));
-    for(const item of items){const card=el('article','club-card topic-card');const body=el('div','club-card-content');body.append(cardHead(item),el('h2','',item.title),el('p','',item.body));const replies=el('div','club-replies');replies.hidden=true;const toggle=makeButton(`查看回复 · ${item.replyCount}`,async()=>{if(!replies.hidden){replies.hidden=true;return;}replies.hidden=false;replies.replaceChildren(notice('正在读取回复…'));try{const data=await request(`/api/topics/${item.id}/replies`);replies.replaceChildren();if(!data.items.length)replies.append(notice('还没有回复。'));for(const reply of data.items){const row=el('div','club-reply');row.append(cardHead(reply),el('p','',reply.body));replies.append(row);}if(user){const replyForm=el('form','club-reply-form');const field=el('textarea');field.required=true;field.maxLength=1000;field.rows=2;field.placeholder='说说你的看法…';field.setAttribute('aria-label','回复内容');const send=el('button','','发送回复');send.type='submit';const response=el('p','club-form-status');replyForm.append(field,send,response);replyForm.addEventListener('submit',async event=>{event.preventDefault();send.disabled=true;try{await request(`/api/topics/${item.id}/replies`,{method:'POST',body:JSON.stringify({body:field.value.trim()})});field.value='';response.textContent='回复成功';const data=await request(`/api/topics/${item.id}/replies`);replies.replaceChildren(...data.items.map(reply=>{const row=el('div','club-reply');row.append(cardHead(reply),el('p','',reply.body));return row;}),replyForm);toggle.textContent=`查看回复 · ${data.items.length}`;}catch(error){response.textContent=friendlyError(error);}finally{send.disabled=false;}});replies.append(replyForm);}else replies.append(gate('登录后可以回复这条话题。'));}catch(error){replies.replaceChildren(notice(friendlyError(error)));}},'club-text-button');body.append(toggle,replies);card.append(body);list.append(card);}
+  sectionTop(content,'discussion');compose(content,'discussion');
+  const bar=el('div','forum-list-bar');bar.append(el('h2','','全部帖子'),el('span','','最新发布'));content.append(bar);
+  const list=el('div','club-list forum-list');content.append(list);list.append(notice('正在读取帖子…'));
+  try{const {items}=await request('/api/topics');list.replaceChildren();if(!items.length)list.append(notice('还没有帖子，来发第一篇吧。'));
+    for(const item of items){const card=el('article','club-card topic-card');const body=el('div','club-card-content');const link=el('a','forum-title',item.title);link.href='#discussion/'+item.id;body.append(postMeta(item),link,el('p','forum-excerpt',item.body));const footer=el('div','forum-row-footer');footer.append(el('span','forum-reply-count',`${item.replyCount} 条回复`),el('a','forum-open','进入讨论 →'));footer.lastChild.href=link.href;body.append(footer);card.append(body);list.append(card);}
   }catch(error){list.replaceChildren(notice(friendlyError(error)));}
+}
+async function suggestionDetail(content,id){
+  sectionTop(content,'suggestions');const back=el('a','forum-back','← 返回建议列表');back.href='#suggestions';content.append(back);
+  const container=el('div','forum-detail-wrap');content.append(container);container.append(notice('正在读取建议…'));
+  try{const {item}=await request('/api/suggestions/'+id);container.replaceChildren();const card=el('article','club-card forum-detail');const body=el('div','club-card-content');body.append(postMeta(item),el('h2','forum-detail-title',item.title),el('p','forum-detail-body',item.body));card.append(voteButton(item),body);container.append(card);}
+  catch(error){container.replaceChildren(notice(friendlyError(error)));}
+}
+function replyRow(reply){const row=el('article','club-reply');row.append(postMeta(reply),el('p','',reply.body));return row;}
+async function topicDetail(content,id){
+  sectionTop(content,'discussion');const back=el('a','forum-back','← 返回帖子列表');back.href='#discussion';content.append(back);
+  const container=el('div','forum-detail-wrap');content.append(container);container.append(notice('正在读取帖子…'));
+  try{const {item}=await request('/api/topics/'+id);container.replaceChildren();const card=el('article','club-card forum-detail');const body=el('div','club-card-content');body.append(postMeta(item),el('h2','forum-detail-title',item.title),el('p','forum-detail-body',item.body));card.append(body);container.append(card);
+    const section=el('section','forum-replies-section');const header=el('div','forum-list-bar');const title=el('h2','',`回复 · ${item.replyCount}`);header.append(title);section.append(header);const replies=el('div','club-replies');section.append(replies);container.append(section);
+    async function reloadReplies(){replies.replaceChildren(notice('正在读取回复…'));try{const data=await request(`/api/topics/${id}/replies`);replies.replaceChildren();title.textContent=`回复 · ${data.items.length}`;if(!data.items.length)replies.append(notice('还没有回复，来说第一句吧。'));for(const reply of data.items)replies.append(replyRow(reply));}catch(error){replies.replaceChildren(notice(friendlyError(error)));}}
+    await reloadReplies();
+    if(user){const replyForm=el('form','club-reply-form');const label=el('label','','写回复');const field=el('textarea');field.required=true;field.maxLength=1000;field.rows=3;field.placeholder='说说你的看法…';label.append(field);const send=el('button','','发送回复');send.type='submit';const status=el('p','club-form-status');status.setAttribute('role','status');replyForm.append(label,send,status);replyForm.addEventListener('submit',async event=>{event.preventDefault();send.disabled=true;status.textContent='正在发送…';try{await request(`/api/topics/${id}/replies`,{method:'POST',body:JSON.stringify({body:field.value.trim()})});field.value='';status.textContent='回复成功';await reloadReplies();}catch(error){status.textContent=friendlyError(error);}finally{send.disabled=false;}});section.append(replyForm);}else section.append(gate('登录后可以参与回复。'));
+  }catch(error){container.replaceChildren(notice(friendlyError(error)));}
 }
 async function leaderboard(content){
   content.append(heading('HIGH SCORE CLUB','游戏排行榜','五个游戏各有榜单。游客可以看，登录玩家完成一局后自动上榜。'));
@@ -63,7 +108,7 @@ function account(content){
   formNode.addEventListener('submit',async event=>{event.preventDefault();const button=formNode.querySelector('button'),status=formNode.querySelector('[role=status]');button.disabled=true;status.textContent='正在处理…';try{const data=await request('/api/'+accountMode,{method:'POST',body:JSON.stringify({username:formNode.elements.username.value.trim(),password:formNode.elements.password.value})});saveSession(data);location.hash=returnTo;returnTo='games';}catch(error){status.textContent=friendlyError(error);}finally{button.disabled=false;}});
   content.append(formNode);const guest=el('a','guest-link','游客登录 · 先逛逛 →');guest.href='#games';content.append(guest);
 }
-async function renderCurrent(){const route=location.hash.slice(1),visible=routes.has(route);page.hidden=!visible;if(!visible)return;$('#lobby').hidden=true;$('#game-screen').hidden=true;const content=el('div');content.id='club-content';$('#club-content').replaceWith(content);$('#club-location').textContent={suggestions:'意见留言',discussion:'玩家社区',leaderboard:'排行榜',account:'登录 / 注册'}[route];document.querySelectorAll('[data-club-nav]').forEach(link=>link.classList.toggle('active',link.dataset.clubNav===route));if(route==='suggestions')await suggestions(content);else if(route==='discussion')await discussion(content);else if(route==='leaderboard')await leaderboard(content);else account(content);}
+async function renderCurrent(){const route=location.hash.slice(1),detail=/^(suggestions|discussion)\/(\d+)$/.exec(route),base=detail?.[1]||route,visible=routes.has(base);page.hidden=!visible;if(!visible)return;$('#lobby').hidden=true;$('#game-screen').hidden=true;const content=el('div');content.id='club-content';$('#club-content').replaceWith(content);$('#club-location').textContent={suggestions:'意见留言',discussion:'玩家社区',leaderboard:'排行榜',account:'登录 / 注册'}[base];document.querySelectorAll('[data-club-nav]').forEach(link=>link.classList.toggle('active',link.dataset.clubNav===base));if(detail){if(base==='suggestions')await suggestionDetail(content,detail[2]);else await topicDetail(content,detail[2]);}else if(base==='suggestions')await suggestions(content);else if(base==='discussion')await discussion(content);else if(base==='leaderboard')await leaderboard(content);else account(content);}
 window.addEventListener('hashchange',renderCurrent);
 window.addEventListener('sweetfrog:finished',async event=>{if(!user)return;const {game,score}=event.detail;if(!games[game])return;try{await request(`/api/leaderboards/${game}`,{method:'POST',body:JSON.stringify({score})});}catch(error){console.warn('成绩提交失败:',friendlyError(error));}});
 await refreshSession();syncAdminLink();renderCurrent();

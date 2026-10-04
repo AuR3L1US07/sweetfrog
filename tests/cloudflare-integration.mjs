@@ -32,11 +32,17 @@ try {
   assert.equal((await call('/api/register','POST',{username:'TESTFROG',password:'password123'}))[0],409);
   assert.equal((await call('/api/login','POST',{username:'testfrog',password:'wrong-password'}))[0],401);
   assert.equal((await call('/api/login','POST',{username:'testfrog',password:'password123'}))[0],200);
-  assert.equal((await call('/api/suggestions','POST',{title:'More frogs',body:'Please add them'},token))[0],201);
+  const [suggestionStatus,suggestionCreated]=await call('/api/suggestions','POST',{title:'More frogs',body:'Please add them'},token);
+  assert.equal(suggestionStatus,201);
+  assert.equal((await call(`/api/suggestions/${suggestionCreated.id}`))[1].item.title,'More frogs');
+  assert.equal((await call('/api/suggestions/999999'))[0],404);
   assert.equal((await call('/api/suggestions/1/vote','POST',{},token))[1].added,true);
   assert.equal((await call('/api/suggestions/1/vote','POST',{},token))[1].added,false);
   assert.equal((await call('/api/suggestions'))[1].items[0].votes,1);
-  assert.equal((await call('/api/topics','POST',{title:'Tips',body:'How to play?'},token))[0],201);
+  const [topicStatus,topicCreated]=await call('/api/topics','POST',{title:'Tips',body:'How to play?'},token);
+  assert.equal(topicStatus,201);
+  assert.equal((await call(`/api/topics/${topicCreated.id}`))[1].item.title,'Tips');
+  assert.equal((await call('/api/topics/999999'))[0],404);
   assert.equal((await call('/api/topics/1/replies','POST',{body:'Practice'},token))[0],201);
   assert.equal((await call('/api/topics/1/replies'))[1].items.length,1);
   for(const game of ['tap','merge','flap','puzzle','aim']) {

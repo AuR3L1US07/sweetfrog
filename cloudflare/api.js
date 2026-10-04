@@ -97,6 +97,15 @@ export async function handleApi(request, env) {
       return session(account);
     }
     if (method === 'POST' && path === '/api/logout') { if (token) await run('DELETE FROM sessions WHERE token_hash=?',await digest(token)); return json({ok:true}); }
+    const detail=/^\/api\/(suggestions|topics)\/(\d+)$/.exec(path);
+    if (detail && method==='GET') {
+      const [,,rawId]=detail, id=Number(rawId), suggestion=detail[1]==='suggestions';
+      const item=suggestion
+        ? await first(`SELECT s.id,s.title,s.body,s.created_at AS createdAt,u.username,(SELECT count(*) FROM suggestion_votes v WHERE v.suggestion_id=s.id) AS votes,EXISTS(SELECT 1 FROM suggestion_votes v WHERE v.suggestion_id=s.id AND v.user_id=?) AS voted FROM suggestions s JOIN users u ON u.id=s.user_id WHERE s.id=?`,user?.id||-1,id)
+        : await first(`SELECT t.id,t.title,t.body,t.created_at AS createdAt,u.username,(SELECT count(*) FROM replies r WHERE r.topic_id=t.id) AS replyCount FROM topics t JOIN users u ON u.id=t.user_id WHERE t.id=?`,id);
+      if (!item) fail(404,suggestion?'建议不存在':'帖子不存在');
+      return json({item});
+    }
     if (path === '/api/suggestions' || path === '/api/topics') {
       if (method === 'GET') return json({items:await (path.endsWith('suggestions') ? suggestions() : topics())});
       if (method === 'POST') {
@@ -104,8 +113,8 @@ export async function handleApi(request, env) {
         const data=await body(request), isSuggestion=path.endsWith('suggestions'), max=isSuggestion?500:2000;
         const title=text(data.title,80), content=text(data.body,max);
         if (!title || title.length>80 || !content || content.length>max) fail(400,'标题或内容长度不合适');
-        await run(`INSERT INTO ${isSuggestion?'suggestions':'topics'}(user_id,title,body) VALUES(?,?,?)`,user.id,title,content);
-        return json({ok:true},201);
+        const result=await first(`INSERT INTO ${isSuggestion?'suggestions':'topics'}(user_id,title,body) VALUES(?,?,?) RETURNING id`,user.id,title,content);
+        return json({ok:true,id:result.id},201);
       }
     }
     const vote=/^\/api\/suggestions\/(\d+)\/vote$/.exec(path);
