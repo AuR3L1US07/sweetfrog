@@ -1,3 +1,4 @@
+import { iconSvg } from './icons.js';
 const frog = document.querySelector('#frog-tap');
 const note = document.querySelector('#frog-note');
 const sticker = document.querySelector('#frog-sticker');
@@ -23,7 +24,7 @@ function showBurst() {
   burst.replaceChildren();
   for (let i = 0; i < 7; i++) {
     const spark = document.createElement('span');
-    spark.textContent = i % 2 ? '✦' : '✳';
+    spark.innerHTML = iconSvg(i % 2 ? 'stars' : 'sparkle');
     spark.style.setProperty('--angle', `${i * (360 / 7)}deg`);
     spark.style.setProperty('--distance', `${76 + (i % 3) * 21}px`);
     burst.append(spark);

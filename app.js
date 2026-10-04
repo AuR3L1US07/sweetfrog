@@ -1,5 +1,6 @@
 import { createAimGame } from './aim.js?v=20261004-pk2';
 import { slideBoard, canMove, RADII, physicsStep } from './core.js';
+import { iconSvg } from './icons.js';
 const $ = s => document.querySelector(s);
 const stage = $('#game-stage'), overlay = $('#game-overlay');
 const descriptions = {
@@ -31,9 +32,10 @@ window.addEventListener('sweetfrog:pk-result',event=>{
  const tones=event.detail.outcome==='win'?[523.25,659.25,783.99,1046.5]:event.detail.outcome==='lose'?[392,349.23,293.66,261.63]:[392,493.88,392];
  const at=ctx.currentTime+.02;tones.forEach((frequency,index)=>note(frequency,at+index*.14,event.detail.outcome==='win'?.38:.3,.05,index===tones.length-1?'triangle':'sine'));
 });
+window.addEventListener('sweetfrog:match-found',()=>{const ctx=ensureAudio();if(!ctx)return;const at=ctx.currentTime+.02;[392,523.25,659.25,783.99].forEach((frequency,index)=>note(frequency,at+index*.11,.33,.045,'triangle'));});
 
 function toast(message) { $('#toast').textContent = message; $('#toast').classList.add('visible'); clearTimeout(toastTimer); toastTimer = setTimeout(() => $('#toast').classList.remove('visible'), 1800); }
-function syncSound(){const toggle=$('#sound-toggle');toggle.textContent=sound?'♫ 声音开':'♫ 声音关';toggle.setAttribute('aria-pressed',String(sound));toggle.setAttribute('aria-label',sound?'关闭音乐和音效':'开启音乐和音效');}
+function syncSound(){const toggle=$('#sound-toggle');toggle.innerHTML=iconSvg('music')+`<span>${sound?'声音开':'声音关'}</span>`;toggle.setAttribute('aria-pressed',String(sound));toggle.setAttribute('aria-label',sound?'关闭音乐和音效':'开启音乐和音效');}
 syncSound();
 $('#sound-toggle').onclick=()=>{sound=!sound;try{localStorage.setItem('sweetfrog-sound',sound?'on':'off');}catch{}syncSound();if(sound){ensureAudio();beep(660,.08);}else audioCtx?.suspend();};
 document.addEventListener('pointerdown',ensureAudio,{once:true});

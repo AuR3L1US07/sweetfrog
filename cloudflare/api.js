@@ -1,4 +1,4 @@
-import { PK_DURATION_MS, pkRows } from '../pk-core.js';
+import { PK_DURATION_MS, pkRows, pkValidBatch } from '../pk-core.js';
 
 const encode = new TextEncoder();
 const hex = bytes => Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, '0')).join('');
@@ -78,6 +78,80 @@ export async function handleApi(request, env) {
       const own = user ? await first('SELECT score FROM scores WHERE game=? AND user_id=?', game, user.id) : null;
       const self = own ? { score:own.score, rank:(await first('SELECT count(*) AS n FROM scores WHERE game=? AND score>?',game,own.score)).n+1 } : null;
       return { entries, self };
+    }
+    const matchGames=['tap','merge','flap','puzzle','aim'];
+    async function presenceState(){
+      const cutoff=Date.now()-70000,queueCutoff=Date.now()-16000;
+      const total=(await first('SELECT count(*) AS n FROM online_presence WHERE last_seen>=?',cutoff)).n;
+      const online=Object.fromEntries(matchGames.map(game=>[game,0]));
+      const waiting=Object.fromEntries(matchGames.map(game=>[game,0]));
+      for(const row of await all('SELECT game,count(*) AS n FROM online_presence WHERE last_seen>=? AND game IS NOT NULL GROUP BY game',cutoff))if(row.game in online)online[row.game]=row.n;
+      for(const row of await all("SELECT game,count(*) AS n FROM match_queue WHERE status='waiting' AND last_seen>=? GROUP BY game",queueCutoff))if(row.game in waiting)waiting[row.game]=row.n;
+      return {total,online,waiting};
+    }
+    async function queueState(){
+      const row=await first('SELECT game,status,room_code FROM match_queue WHERE user_id=?',user.id);
+      return row?{game:row.game,status:row.status,roomCode:row.room_code}:null;
+    }
+    async function findMatch(){
+      const now=Date.now();
+      await run("UPDATE match_queue SET status='waiting' WHERE status='matching' AND last_seen<? AND room_code IS NULL",now-6000);
+      const mine=await first("UPDATE match_queue SET status='matching',last_seen=? WHERE user_id=? AND status='waiting' RETURNING game,joined_at",now,user.id);
+      if(!mine)return queueState();
+      const other=await first("UPDATE match_queue SET status='matching' WHERE user_id=(SELECT q.user_id FROM match_queue q JOIN users u ON u.id=q.user_id WHERE q.game=? AND q.status='waiting' AND q.last_seen>=? AND u.banned=0 AND (q.joined_at<? OR (q.joined_at=? AND q.user_id<?)) ORDER BY q.joined_at,q.user_id LIMIT 1) AND status='waiting' RETURNING user_id",mine.game,now-16000,mine.joined_at,mine.joined_at,user.id);
+      if(!other){await run("UPDATE match_queue SET status='waiting' WHERE user_id=? AND status='matching'",user.id);return queueState();}
+      const alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      try{
+        for(let attempt=0;attempt<5;attempt++){
+          const code=Array.from(crypto.getRandomValues(new Uint8Array(6)),value=>alphabet[value%alphabet.length]).join('');
+          try{
+            await db.batch([
+              statement('INSERT INTO pk_rooms(code,host_id,guest_id,game,host_ready,guest_ready,seed,starts_at,created_at) VALUES(?,?,?,?,1,1,?,?,?)',[code,other.user_id,user.id,mine.game,crypto.getRandomValues(new Uint32Array(1))[0],now+7000,now]),
+              statement("UPDATE match_queue SET status='matched',room_code=? WHERE user_id=? AND status='matching'",[code,other.user_id]),
+              statement("UPDATE match_queue SET status='matched',room_code=? WHERE user_id=? AND status='matching'",[code,user.id])
+            ]);
+            return queueState();
+          }catch(error){if(!String(error).includes('UNIQUE'))throw error;}
+        }
+        fail(503,'创建对战房间失败，请重试');
+      }catch(error){
+        await run("UPDATE match_queue SET status='waiting' WHERE user_id IN (?,?) AND status='matching'",user.id,other.user_id);
+        throw error;
+      }
+    }
+    if(path==='/api/presence'&&method==='GET')return json(await presenceState());
+    if(path==='/api/presence'&&method==='POST'){
+      const data=await body(request),visitorId=data.visitorId,game=data.game||null;
+      if(!/^[a-f0-9]{32}$/.test(visitorId)||game!==null&&!matchGames.includes(game))fail(400,'在线状态无效');
+      const key=user?`u:${user.id}`:`g:${visitorId}`,now=Date.now();
+      await run('DELETE FROM online_presence WHERE last_seen<?',now-86400000);
+      if(user)await run('DELETE FROM online_presence WHERE client_key=?',`g:${visitorId}`);
+      await run('INSERT INTO online_presence(client_key,user_id,game,last_seen) VALUES(?,?,?,?) ON CONFLICT(client_key) DO UPDATE SET game=excluded.game,last_seen=excluded.last_seen',key,user?.id||null,game,now);
+      return json(await presenceState());
+    }
+    if(path==='/api/match/queue'){
+      requireUser();const now=Date.now();
+      if(method==='POST'){
+        const game=(await body(request)).game;if(!matchGames.includes(game))fail(400,'请选择对战游戏');await rate(`match-join:${user.id}`,30);
+        await run('DELETE FROM match_queue WHERE last_seen<?',now-86400000);
+        await run('INSERT INTO match_queue(user_id,game,status,joined_at,last_seen,room_code) VALUES(?,?,\'waiting\',?,?,NULL) ON CONFLICT(user_id) DO UPDATE SET game=excluded.game,status=\'waiting\',joined_at=excluded.joined_at,last_seen=excluded.last_seen,room_code=NULL',user.id,game,now,now);
+        return json({queue:await findMatch()});
+      }
+      if(method==='GET'){
+        await run("UPDATE match_queue SET last_seen=? WHERE user_id=? AND status='waiting'",now,user.id);
+        const queue=await queueState();
+        if(queue?.status==='matched'){
+          const matchRoom=await first('SELECT starts_at FROM pk_rooms WHERE code=?',queue.roomCode);
+          if(!matchRoom||now>matchRoom.starts_at+PK_DURATION_MS+10000){await run('DELETE FROM match_queue WHERE user_id=? AND status=\'matched\'',user.id);return json({queue:null});}
+        }
+        return json({queue:queue?.status==='waiting'?await findMatch():queue});
+      }
+      if(method==='DELETE'){
+        const ack=(await body(request)).ack===true;
+        const result=await run(ack?"DELETE FROM match_queue WHERE user_id=? AND status IN ('waiting','matched')":"DELETE FROM match_queue WHERE user_id=? AND status='waiting'",user.id);
+        if(!result.meta.changes){const current=await queueState();if(current?.status==='matched')fail(409,'已经匹配成功，正在进入房间');if(current?.status==='matching')fail(409,'正在确认对手，请稍候');}
+        return json({ok:true});
+      }
     }
     if (method === 'GET' && path === '/api/session') return json({ user });
     const avatarPath=/^\/api\/avatars\/(\d+)$/.exec(path);
@@ -209,16 +283,15 @@ export async function handleApi(request, env) {
       }
       if(action==='hit'&&method==='POST'){
         if(room.game!=='tap')fail(400,'此游戏不使用点格模式');
-        const data=await body(request),col=data.col,step=data.step,round=data.round,now=Date.now();
-        if(!Number.isInteger(col)||col<0||col>3||!Number.isInteger(step)||step<0||step>300||!Number.isSafeInteger(round)||round<1)fail(400,'操作无效');
+        const data=await body(request),cols=data.cols??[data.col],step=data.step,round=data.round,now=Date.now();
+        if(!Array.isArray(cols)||cols.length<1||cols.length>32||cols.some(col=>!Number.isInteger(col)||col<0||col>3)||!Number.isInteger(step)||step<0||step+cols.length>300||!Number.isSafeInteger(round)||round<1)fail(400,'操作无效');
         if(round!==room.round)fail(409,'这次点击属于上一局');
         if(!room.starts_at||now<room.starts_at||now>room.starts_at+PK_DURATION_MS+1200)fail(409,'本局尚未开始或已经结束');
         const isHost=user.id===room.host_id,scoreColumn=isHost?'host_score':'guest_score',lastColumn=isHost?'host_last_hit':'guest_last_hit';
         const current=room[scoreColumn];
         if(step!==current)fail(409,'成绩已更新，请同步房间');
-        if(now-room[lastColumn]<45)fail(429,'点击太快，请稍等片刻');
-        if(pkRows(room.seed,current)[4]!==col)return json({correct:false,room:roomState(room)});
-        const result=await run(`UPDATE pk_rooms SET ${scoreColumn}=${scoreColumn}+1,${lastColumn}=? WHERE code=? AND round=? AND ${scoreColumn}=? AND starts_at<=? AND starts_at+? >=?`,now,code,round,current,now,PK_DURATION_MS+1200,now);
+        if(!pkValidBatch(room.seed,current,cols))return json({correct:false,room:roomState(room)});
+        const result=await run(`UPDATE pk_rooms SET ${scoreColumn}=${scoreColumn}+?,${lastColumn}=? WHERE code=? AND round=? AND ${scoreColumn}=? AND starts_at<=? AND starts_at+? >=?`,cols.length,now,code,round,current,now,PK_DURATION_MS+1200,now);
         if(!result.meta.changes)fail(409,'成绩已更新，请同步房间');
         room=await getRoom(code);
         return json({correct:true,room:roomState(room)});

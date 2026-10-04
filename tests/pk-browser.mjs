@@ -63,13 +63,16 @@ try {
   await guestPage.screenshot({path:'tests/pk-mobile-preview.png',fullPage:true});
   await hostPage.locator('.pk-row:last-child .pk-cell.face').click();
   await hostPage.getByText('1',{exact:true}).first().waitFor();
-  await guestPage.waitForFunction(()=>document.querySelector('.pk-player-score')?.textContent==='1');
+  await hostPage.evaluate(()=>{for(let index=0;index<19;index++)document.querySelector('.pk-row:last-child .pk-cell.face').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));});
+  await hostPage.waitForFunction(()=>document.querySelector('.pk-player.is-self .pk-player-score')?.textContent==='20');
+  await guestPage.waitForFunction(()=>document.querySelector('.pk-player-score')?.textContent==='20',{timeout:10000});
   await guestPage.reload();
   await guestPage.getByText(host.user.username).waitFor();
   assert.equal(await guestPage.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   execFileSync(process.execPath,[cli,'d1','execute','sweetfrog-db','--local','--persist-to',state,'--command',`UPDATE pk_rooms SET starts_at=${Date.now()-33000} WHERE code='${code}'`],{cwd:root,stdio:'pipe'});
   await hostPage.locator('#pk-result.is-win').waitFor({state:'visible',timeout:10000});
   await guestPage.locator('#pk-result.is-lose').waitFor({state:'visible',timeout:10000});
+  assert.match(await hostPage.locator('.pk-result-copy').textContent(),/你 20 分，对方 0 分/);
   await hostPage.screenshot({path:'tests/pk-result-win-preview.png',fullPage:true});
   await guestPage.screenshot({path:'tests/pk-result-lose-mobile-preview.png',fullPage:true});
   await hostPage.getByRole('button',{name:'不服？再来一局'}).click();

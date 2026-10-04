@@ -18,3 +18,7 @@ export function pkRows(seed, score) {
   }
   return rows;
 }
+
+export function pkValidBatch(seed, startScore, columns) {
+  return columns.every((column, index) => pkRows(seed, startScore + index)[4] === column);
+}

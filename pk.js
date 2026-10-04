@@ -1,5 +1,6 @@
 import { PK_DURATION_MS, pkRows } from './pk-core.js';
-import { launchPkGame, stopPkGame } from './app.js?v=20261004-pk3';
+import { launchPkGame, stopPkGame } from './app.js?v=20261004-pk4';
+import { iconSvg } from './icons.js';
 
 const games={tap:'逮住大青蛙',merge:'合成大青蛙',flap:'青蛙起飞',puzzle:'青蛙2048',aim:'青蛙定位练习'};
 
@@ -16,7 +17,7 @@ document.querySelector('.site-header nav a[href="#games"]').after(nav);
 
 const content = page.querySelector('#pk-content');
 const make = (tag, className, text) => { const node = document.createElement(tag);node.className = className;if(text!==undefined)node.textContent=text;return node; };
-let me = null, room = null, localScore = null, pendingHits = 0, hitQueue = Promise.resolve();
+let me = null, room = null, localScore = null, pendingHits = 0, hitBuffer = [], hitSending = false, hitTimer = 0, finalSyncedRound = 0;
 let routeId = 0, pollTimer = 0, tickTimer = 0, polling = false, clockOffset = 0;
 let viewCode = '', errorMessage = '';
 let pkLaunched=false,pkResultShown=false,scoreSeq=0,latestScore=null,scoreTimer=0,scoreQueue=Promise.resolve(),pendingScores=0;
@@ -35,7 +36,7 @@ async function api(path, options={}) {
   return data;
 }
 
-function stopTimers() { clearInterval(pollTimer);clearInterval(tickTimer);clearTimeout(scoreTimer);pollTimer=0;tickTimer=0;scoreTimer=0;polling=false; }
+function stopTimers() { clearInterval(pollTimer);clearInterval(tickTimer);clearTimeout(scoreTimer);clearTimeout(hitTimer);pollTimer=0;tickTimer=0;scoreTimer=0;hitTimer=0;polling=false; }
 function alertText(text) { const status=content.querySelector('#pk-error');if(status)status.textContent=text;else errorMessage=text; }
 function loginGate() {
   const card=make('section','pk-intro-card');
@@ -50,14 +51,14 @@ function landing() {
   content.append(head);
   if(!me){loginGate();return;}
   const grid=make('div','pk-entry-grid');
-  const create=make('section','pk-entry-card');create.append(make('span','pk-entry-icon','✳'),make('h2','','我来开房'),make('p','','先选游戏，再把房间链接发给朋友。'));
+  const create=make('section','pk-entry-card');const createIcon=make('span','pk-entry-icon');createIcon.innerHTML=iconSvg('add');create.append(createIcon,make('h2','','我来开房'),make('p','','先选游戏，再把房间链接发给朋友。'));
   const choice=make('fieldset','pk-game-choice');choice.append(make('legend','','选择对战游戏'));
   for(const [key,label] of Object.entries(games)){const option=make('label','pk-game-option');const input=make('input','');input.type='radio';input.name='pk-game';input.value=key;input.checked=key==='tap';option.append(input,make('span','',label));choice.append(option);}
   create.append(choice);
   const createButton=make('button','pk-main-button','创建房间 →');createButton.type='button';
   createButton.addEventListener('click',async()=>{createButton.disabled=true;alertText('正在创建房间…');try{const game=choice.querySelector('input:checked').value;const data=await api('',{method:'POST',body:{game}});location.hash='pk/'+data.room.code;}catch(error){alertText(error.message);createButton.disabled=false;}});
   create.append(createButton);
-  const join=make('section','pk-entry-card');join.append(make('span','pk-entry-icon','↗'),make('h2','','加入朋友的房间'),make('p','','输入六位房间码，和朋友进入同一场对局。'));
+  const join=make('section','pk-entry-card');const joinIcon=make('span','pk-entry-icon');joinIcon.innerHTML=iconSvg('join');join.append(joinIcon,make('h2','','加入朋友的房间'),make('p','','输入六位房间码，和朋友进入同一场对局。'));
   const joinForm=make('form','pk-join-form');const input=make('input','');input.name='code';input.maxLength=6;input.required=true;input.autocomplete='off';input.placeholder='输入房间码';input.setAttribute('aria-label','六位房间码');
   const joinButton=make('button','pk-main-button','加入房间');joinButton.type='submit';joinForm.append(input,joinButton);
   joinForm.addEventListener('submit',async event=>{event.preventDefault();const code=input.value.toUpperCase().replace(/[^A-HJ-NP-Z2-9]/g,'');if(code.length!==6){alertText('请输入六位房间码。');return;}joinButton.disabled=true;alertText('正在加入房间…');try{await api('/'+code+'/join',{method:'POST'});location.hash='pk/'+code;}catch(error){alertText(error.message);joinButton.disabled=false;}});
@@ -72,7 +73,7 @@ function playerCard(label) {
   card.append(avatar,copy,make('strong','pk-player-score','0'));return card;
 }
 function mountRoom(code) {
-  content.replaceChildren();viewCode=code;localScore=null;pendingHits=0;hitQueue=Promise.resolve();pkLaunched=false;pkResultShown=false;scoreSeq=0;latestScore=null;scoreQueue=Promise.resolve();pendingScores=0;resultAnnouncedRound=0;focusedRound=0;rematchBusy=false;
+  content.replaceChildren();viewCode=code;localScore=null;pendingHits=0;hitBuffer=[];hitSending=false;finalSyncedRound=0;pkLaunched=false;pkResultShown=false;scoreSeq=0;latestScore=null;scoreQueue=Promise.resolve();pendingScores=0;resultAnnouncedRound=0;focusedRound=0;rematchBusy=false;
   const head=make('div','club-heading');head.innerHTML='<span class="eyebrow">LIVE FRIEND MATCH</span><h1 id="pk-game-title">好友 PK</h1><p id="pk-game-description">正在读取房间选择的游戏…</p>';
   const back=make('a','forum-back','← 返回好友 PK');back.href='#pk';
   const roomCard=make('section','pk-room-card');
@@ -90,7 +91,7 @@ function mountRoom(code) {
   game.append(top,board);
   const result=make('section','pk-result');result.id='pk-result';result.hidden=true;result.setAttribute('aria-live','polite');
   const burst=make('div','pk-result-burst');burst.setAttribute('aria-hidden','true');for(let i=0;i<12;i++)burst.append(make('i',''));
-  const resultIcon=make('div','pk-result-icon','★'),resultTitle=make('h2','pk-result-title','本局结束'),resultCopy=make('p','pk-result-copy','');
+  const resultIcon=make('div','pk-result-icon'),resultTitle=make('h2','pk-result-title','本局结束'),resultCopy=make('p','pk-result-copy','');
   const rematchNote=make('p','pk-rematch-note','');const rematch=make('button','pk-main-button pk-rematch','不服？再来一局');rematch.type='button';rematch.addEventListener('click',()=>rematchAction('request'));
   const accept=make('button','pk-main-button pk-rematch-accept','同意，再来一局 →');accept.type='button';accept.addEventListener('click',()=>rematchAction('accept'));
   const cancel=make('button','pk-quiet-button','撤回邀约');cancel.type='button';cancel.addEventListener('click',()=>rematchAction('cancel'));
@@ -113,7 +114,7 @@ function renderResult(){
   const outcome=room.host.score===room.guest.score?'draw':room.winnerId===me?.id?'win':'lose';
   if(resultAnnouncedRound!==room.round){
     resultAnnouncedRound=room.round;result.classList.remove('is-win','is-lose','is-draw');result.classList.add('is-'+outcome);
-    result.querySelector('.pk-result-icon').textContent=outcome==='win'?'★':outcome==='lose'?'↗':'=';
+    result.querySelector('.pk-result-icon').innerHTML=iconSvg(outcome==='win'?'trophy':outcome==='lose'?'retry':'match');
     result.querySelector('.pk-result-title').textContent=outcome==='win'?'胜利！这局你赢了':outcome==='lose'?'惜败！下一局扳回来':'平局！再比一场';
     result.querySelector('.pk-result-copy').textContent=`第 ${room.round} 局 · 你 ${own.score} 分，对方 ${other.score} 分`;
     window.dispatchEvent(new CustomEvent('sweetfrog:pk-result',{detail:{outcome}}));
@@ -121,7 +122,7 @@ function renderResult(){
   }
   result.hidden=false;
   const note=result.querySelector('.pk-rematch-note'),request=result.querySelector('.pk-rematch'),accept=result.querySelector('.pk-rematch-accept'),cancel=result.querySelector('.pk-quiet-button');
-  const ready=now()>=room.endsAt+1400&&!pendingHits&&!pendingScores&&!scoreTimer;
+  const ready=now()>=room.endsAt+(room.game==='tap'?1200:1400)&&!pendingHits&&!pendingScores&&!scoreTimer&&(room.game!=='tap'||finalSyncedRound===room.round);
   request.hidden=!ready||Boolean(room.rematchBy);accept.hidden=!ready||!room.rematchBy||room.rematchBy===me?.id;cancel.hidden=!ready||room.rematchBy!==me?.id;
   note.textContent=!ready?'正在核对最后的成绩…':room.rematchBy===me?.id?'已发出邀约，等对方同意就开下一局。':room.rematchBy?'对方想再来一局，同意后将自动倒计时。':'还想比一场？发起邀约，等朋友点头。';
   for(const button of [request,accept,cancel])button.disabled=rematchBusy;
@@ -154,6 +155,26 @@ function flushScore(){
   latestScore=null;pendingScores++;
   scoreQueue=scoreQueue.then(async()=>{try{const data=await api('/'+code+'/score',{method:'POST',body:{score:value,seq,round}});applyRoom(data.room);}catch(error){if(room?.round===round)alertText(error.message);}finally{if(room?.round===round)pendingScores--;if(pendingScores===0)await poll();}});
 }
+function scheduleHits(){if(!hitTimer&&!hitSending&&hitBuffer.length)hitTimer=setTimeout(flushHits,65);}
+async function flushHits(){
+  clearTimeout(hitTimer);hitTimer=0;
+  if(hitSending||!room||!hitBuffer.length)return;
+  const code=room.code,round=room.round,cols=hitBuffer.splice(0,32),own=me?.id===room.host.id?room.host:room.guest,step=own.score;
+  hitSending=true;
+  try{
+    const data=await api('/'+code+'/hit',{method:'POST',body:{cols,step,round}});
+    if(!data.correct)throw Error('点击记录未通过校验，已同步服务器分数');
+    if(room?.round!==round)return;
+    pendingHits=Math.max(0,pendingHits-cols.length);applyRoom(data.room);alertText('');
+  }catch(error){
+    if(room?.round===round){
+      hitBuffer=[];pendingHits=0;await poll();
+      if(room?.round===round){localScore=(me?.id===room.host.id?room.host:room.guest).score;renderBoard();alertText(error.message);}
+    }
+  }finally{
+    if(room?.round===round){hitSending=false;if(hitBuffer.length)scheduleHits();else if(!pendingHits)await poll();}
+  }
+}
 window.addEventListener('sweetfrog:pk-score',event=>{if(!room||room.game!==event.detail.game||!pkLaunched)return;latestScore=event.detail.score;if(!scoreTimer)scoreTimer=setTimeout(flushScore,250);});
 window.addEventListener('sweetfrog:pk-finished',event=>{if(!room||room.game!==event.detail.game)return;latestScore=event.detail.score;flushScore();});
 function tick() {
@@ -166,12 +187,16 @@ function tick() {
   else if(phase==='ready')status.textContent=own?.ready?'已准备，等待朋友点击准备。':'朋友已加入，点“准备好了”即可开局。';
   else if(phase==='countdown')status.textContent=`准备开局 · ${Math.max(1,Math.ceil((room.startsAt-now())/1000))}`;
   else if(phase==='playing')status.textContent=`${games[room.game]} PK 进行中 · 稳住节奏！`;
-  else if(pendingHits||pendingScores||scoreTimer||now()<room.endsAt+1400)status.textContent='时间到，正在核对最后的成绩…';
+  else if(pendingHits||pendingScores||scoreTimer||now()<room.endsAt+(room.game==='tap'?1200:1400)||room.game==='tap'&&finalSyncedRound!==room.round)status.textContent='时间到，正在核对最后的成绩…';
   else status.textContent=room.host.score===room.guest.score?'平局！':room.winnerId===me?.id?'你赢了！':'这局朋友赢了！';
   game.hidden=phase!=='playing'||room.game!=='tap';
   const timer=content.querySelector('.pk-timer');if(timer)timer.textContent=`${Math.max(0,(room.endsAt-now())/1000).toFixed(1)} 秒`;
   if(phase==='playing'&&room.game==='tap'&&localScore===null){localScore=own?.score||0;renderBoard();}
   if(phase==='playing'&&room.game==='tap'&&focusedRound!==room.round){focusedRound=room.round;requestAnimationFrame(()=>game.scrollIntoView({block:'center',behavior:'instant'}));}
+  if(phase==='finished'&&room.game==='tap'){
+    if(hitBuffer.length&&!hitSending&&!hitTimer)flushHits();
+    else if(!pendingHits&&now()>=room.endsAt+1200&&finalSyncedRound!==room.round&&!polling)poll();
+  }
   if(phase==='playing'&&room.game!=='tap'&&!pkLaunched){
     pkLaunched=true;page.hidden=true;const round=room.round;
     launchPkGame(room.game,room.seed,room.endsAt+clockOffset).then(()=>{
@@ -179,7 +204,7 @@ function tick() {
     });
   }
   if(phase==='finished'&&room.game!=='tap'&&pkLaunched&&!pkResultShown&&!pendingScores&&!scoreTimer){pkResultShown=true;stopPkGame();page.hidden=false;document.querySelector('#lobby').hidden=true;}
-  if(phase==='finished'&&!pendingHits&&!pendingScores&&!scoreTimer&&now()>=room.endsAt+1400)renderResult();
+  if(phase==='finished'&&!pendingHits&&!pendingScores&&!scoreTimer&&now()>=room.endsAt+(room.game==='tap'?1200:1400)&&(room.game!=='tap'||finalSyncedRound===room.round))renderResult();
 }
 function applyRoom(next) {
   if(viewCode!==next.code)return;
@@ -187,7 +212,7 @@ function applyRoom(next) {
   if(room&&next.round>room.round){
     stopPkGame();page.hidden=false;document.querySelector('#game-screen').hidden=true;
     content.querySelector('#pk-result').hidden=true;
-    localScore=null;pendingHits=0;hitQueue=Promise.resolve();pkLaunched=false;pkResultShown=false;scoreSeq=0;latestScore=null;clearTimeout(scoreTimer);scoreTimer=0;pendingScores=0;scoreQueue=Promise.resolve();focusedRound=0;resultAnnouncedRound=0;
+    localScore=null;pendingHits=0;hitBuffer=[];hitSending=false;clearTimeout(hitTimer);hitTimer=0;finalSyncedRound=0;pkLaunched=false;pkResultShown=false;scoreSeq=0;latestScore=null;clearTimeout(scoreTimer);scoreTimer=0;pendingScores=0;scoreQueue=Promise.resolve();focusedRound=0;resultAnnouncedRound=0;
     content.querySelector('#pk-board').replaceChildren();
     requestAnimationFrame(()=>content.querySelector('.pk-room-card').scrollIntoView({block:'center',behavior:'instant'}));
   }
@@ -213,7 +238,7 @@ function applyRoom(next) {
 }
 async function poll() {
   if(polling||!viewCode||!location.hash.toLowerCase().startsWith('#pk/'))return;polling=true;
-  try{const data=await api('/'+viewCode);applyRoom(data.room);alertText('');}
+  try{const data=await api('/'+viewCode);applyRoom(data.room);if(room?.game==='tap'&&data.room.round===room.round&&data.room.endsAt&&data.room.serverNow>=data.room.endsAt+1200){finalSyncedRound=room.round;tick();}alertText('');}
   catch(error){alertText(error.message);}
   finally{polling=false;}
 }
@@ -221,11 +246,10 @@ function hit(col) {
   if(!room||phaseFor(room)!=='playing'||localScore===null)return;
   const rows=pkRows(room.seed,localScore);
   if(rows[4]!==col){const board=content.querySelector('#pk-board');board.classList.remove('miss');void board.offsetWidth;board.classList.add('miss');window.dispatchEvent(new CustomEvent('sweetfrog:pk-hit',{detail:{correct:false}}));return;}
-  const step=localScore++;pendingHits++;renderBoard();
+  localScore++;pendingHits++;hitBuffer.push(col);renderBoard();
   content.querySelectorAll('.pk-player')[me.id===room.host.id?0:1].querySelector('.pk-player-score').textContent=String(localScore);
   window.dispatchEvent(new CustomEvent('sweetfrog:pk-hit',{detail:{correct:true}}));
-  const code=room.code,round=room.round;
-  hitQueue=hitQueue.then(async()=>{try{const data=await api('/'+code+'/hit',{method:'POST',body:{col,step,round}});applyRoom(data.room);}catch(error){if(room?.round===round)alertText(error.message);}finally{if(room?.round===round)pendingHits--;if(pendingHits===0)await poll();}});
+  if(hitBuffer.length>=24)flushHits();else scheduleHits();
 }
 async function route() {
   const match=/^pk(?:\/([A-HJ-NP-Z2-9]{6}))?$/.exec(location.hash.slice(1).toUpperCase().replace(/^PK/,'pk'));

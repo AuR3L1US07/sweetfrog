@@ -1,0 +1,13 @@
+.sf-icon{display:inline-block;width:1em;height:1em;vertical-align:-.14em;flex:none}
+.brand-mark{display:grid;place-items:center;letter-spacing:0}.brand-mark .sf-icon{width:26px;height:26px;transform:rotate(12deg)}
+.spark{display:grid;place-items:center}.spark-one .sf-icon{width:43px;height:43px}.spark-two .sf-icon{width:50px;height:50px}
+.bottom-note>span:first-child .sf-icon{width:35px;height:35px}.note-smile .sf-icon{width:48px;height:48px}
+#overlay-icon .sf-icon{width:43px;height:43px}
+.card-title>span{display:grid;place-items:center}.card-title>span .sf-icon{width:14px;height:14px}
+.pk-lobby-arrow .sf-icon,.match-lobby-arrow .sf-icon{width:14px;height:14px;vertical-align:-.18em}
+.pk-entry-icon .sf-icon{width:25px;height:25px}.pk-result-icon .sf-icon{width:43px;height:43px}
+.frog-burst .sf-icon{width:19px;height:19px}
+#sound-toggle{display:inline-flex;align-items:center;gap:5px}#sound-toggle .sf-icon{width:15px;height:15px}.forum-compose-symbol .sf-icon{width:24px;height:24px}
+.lobby-online{display:inline-flex;align-items:center;gap:6px;margin-top:10px;padding:5px 10px;border:1px solid #c8e8d8;border-radius:999px;background:#f8fffbcb;color:#326c56;font-size:11px;font-weight:850;box-shadow:inset 0 1px #fff}.lobby-online i{width:7px;height:7px;border-radius:50%;background:#3db98d;box-shadow:0 0 0 3px #b7efd4}.lobby-online strong{font-variant-numeric:tabular-nums;font-size:13px}
+.match-lobby-banner{display:flex;align-items:center;gap:15px;margin-top:12px;padding:18px 21px;border:1px solid #d4d5ef;border-radius:18px;background:linear-gradient(110deg,#f0f8f5,#e8f0fc 60%,#f0eafa);box-shadow:0 10px 24px #5477a21a;transition:transform .2s,box-shadow .2s}.match-lobby-banner:hover{transform:translateY(-3px);box-shadow:0 14px 27px #5477a22a}.match-lobby-icon{display:grid;place-items:center;width:45px;height:45px;flex:none;border-radius:14px;background:#547e9c;color:#fff}.match-lobby-icon .sf-icon{width:26px;height:26px}.match-lobby-banner strong,.match-lobby-banner small{display:block}.match-lobby-banner strong{color:#315c70;font:400 20px "Sweet Round",sans-serif}.match-lobby-banner small{margin-top:4px;color:#688294;font-size:11px}.match-lobby-arrow{margin-left:auto;color:#456e9a;font-size:13px;font-weight:900;white-space:nowrap}
+@media(max-width:650px){.match-lobby-banner{padding:14px;gap:10px}.match-lobby-banner strong{font-size:16px}.match-lobby-banner small{font-size:10px}.match-lobby-arrow{font-size:11px}.match-lobby-icon{width:40px;height:40px}}

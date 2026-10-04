@@ -1,4 +1,5 @@
 import { communityRequest } from './community-transport.js';
+import { iconSvg } from './icons.js';
 
 const games = { tap:'逮住大青蛙', merge:'合成大青蛙', flap:'青蛙起飞', puzzle:'青蛙2048', aim:'青蛙定位练习' };
 const routes = new Set(['suggestions','discussion','leaderboard','account','profile']);
@@ -40,7 +41,7 @@ function compose(content,type){
   const action=isIdea?'发布建议':'发布帖子';
   const back=el('a','forum-back',isIdea?'← 返回建议列表':'← 返回帖子列表');back.href='#'+type;content.append(back);
   const panel=el('section','forum-compose');
-  const top=el('div','forum-compose-head');top.append(el('div','forum-compose-symbol',isIdea?'✦':'#'),el('div','forum-compose-copy'));
+  const top=el('div','forum-compose-head');const symbol=el('div','forum-compose-symbol');symbol.innerHTML=iconSvg(isIdea?'sparkle':'topic');top.append(symbol,el('div','forum-compose-copy'));
   top.lastChild.append(el('strong','',isIdea?'写下你的建议':'发起一个话题'),el('p','',isIdea?'说说你希望怎样改进。':'分享一个想法，邀请大家一起聊。'));
   panel.append(top);
   if(user){const editor=form(action+' ↗',isIdea?500:2000,data=>request(isIdea?'/api/suggestions':'/api/topics',{method:'POST',body:JSON.stringify(data)}),result=>{location.hash=(isIdea?'suggestions/':'discussion/')+result.id;});editor.querySelector('[name=title]').placeholder=isIdea?'用一句话概括建议':'给帖子起个标题';editor.querySelector('[name=body]').placeholder=isIdea?'具体希望怎样改进？':'写下你的想法…';panel.append(editor);}

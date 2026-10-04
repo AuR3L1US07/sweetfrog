@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pkColumn, pkRows } from '../pk-core.js';
+import { pkColumn, pkRows, pkValidBatch } from '../pk-core.js';
 
 test('both players receive the same deterministic board at each score', () => {
   const seed = 123456789;
@@ -13,4 +13,12 @@ test('both players receive the same deterministic board at each score', () => {
     assert.equal(current[0], pkColumn(seed, score + 4));
     assert.deepEqual(pkRows(seed, score), current);
   }
+});
+
+test('a rapid batch verifies each consecutive target and rejects an incorrect middle hit', () => {
+  const seed = 123456789;
+  const columns = Array.from({ length: 24 }, (_, index) => pkRows(seed, index)[4]);
+  assert.equal(pkValidBatch(seed, 0, columns), true);
+  columns[12] = (columns[12] + 1) % 4;
+  assert.equal(pkValidBatch(seed, 0, columns), false);
 });
