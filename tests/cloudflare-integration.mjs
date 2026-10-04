@@ -71,6 +71,12 @@ try {
   assert.equal((await call('/api/presence','POST',{visitorId,game:'tap'},token))[1].total,1,'guest presence becomes signed-in presence');
   const presence=(await call('/api/presence','POST',{visitorId:otherVisitor,game:'aim'},admin.token))[1];
   assert.equal(presence.total,2);assert.equal(presence.online.tap,1);assert.equal(presence.online.aim,1);
+  const roster=(await call('/api/presence/players'))[1];
+  assert.equal(roster.total,2);assert.equal(roster.registered,2);assert.equal(roster.guests,0);
+  assert.deepEqual(roster.players.map(entry=>entry.username).sort(),['testadmin','testfrog']);
+  assert.equal(JSON.stringify(roster).includes(visitorId),false,'visitor identifiers stay private');
+  await call('/api/presence','POST',{visitorId:'fedcba9876543210fedcba9876543210',game:null});
+  assert.equal((await call('/api/presence/players'))[1].guests,1);
   assert.equal((await call('/api/match/queue','POST',{game:'tap'}))[0],401);
   assert.equal((await call('/api/match/queue','POST',{game:'invalid'},token))[0],400);
   assert.equal((await call('/api/match/queue','POST',{game:'tap'},token))[1].queue.status,'waiting');

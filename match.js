@@ -4,12 +4,17 @@ const names={tap:'逮住大青蛙',merge:'合成大青蛙',flap:'青蛙起飞',p
 const page=document.createElement('main');page.id='match-page';page.hidden=true;
 page.innerHTML='<nav class="club-breadcrumb" aria-label="当前位置"><a href="#games">← 游戏大厅</a><span>快速匹配</span></nav><div id="match-content"></div>';
 document.querySelector('#game-screen').before(page);
+const onlinePage=document.createElement('main');onlinePage.id='online-page';onlinePage.hidden=true;
+onlinePage.innerHTML='<nav class="club-breadcrumb" aria-label="当前位置"><a href="#games">← 游戏大厅</a><span>在线玩家</span></nav><div id="online-content"></div>';
+page.after(onlinePage);
 const nav=document.createElement('a');nav.href='#match';nav.className='club-nav-link';nav.textContent='快速匹配';document.querySelector('.club-nav-link')?.after(nav);
 const content=page.querySelector('#match-content');
+const onlineContent=onlinePage.querySelector('#online-content');
 const make=(tag,className,text)=>{const node=document.createElement(tag);node.className=className;if(text!==undefined)node.textContent=text;return node;};
 const token=()=>{try{return localStorage.getItem('sweetfrog-session')||'';}catch{return '';}};
 let visitorId;try{visitorId=localStorage.getItem('sweetfrog-visitor-id');if(!/^[a-f0-9]{32}$/.test(visitorId||'')){visitorId=Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,'0')).join('');localStorage.setItem('sweetfrog-visitor-id',visitorId);}}catch{visitorId=Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,'0')).join('');}
 let selected='tap',user=null,queue=null,queueTimer=0,countsTimer=0,successTimer=0,routeId=0,queueVersion=0,requesting=false,latestCounts=null,shownRoom='';
+let onlineTimer=0,onlineRouteId=0,onlineRefreshId=0;
 async function api(path,options={}){
   const response=await fetch('/api/'+path,{method:options.method||'GET',headers:{'Content-Type':'application/json',...(token()?{Authorization:`Bearer ${token()}`}:{})},body:options.body===undefined?undefined:JSON.stringify(options.body)});
   const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(data.error||'连接失败，请稍后重试');return data;
@@ -96,7 +101,7 @@ async function cancel(){
 function render(){
   content.replaceChildren();
   const head=make('div','club-heading');head.innerHTML='<span class="eyebrow">QUICK MATCH</span><h1>快速匹配</h1><p>选一款游戏，找到同场对手。30 秒见分晓。</p>';
-  const stats=make('div','match-summary');stats.innerHTML=`<span class="match-summary-icon">${iconSvg('people')}</span><span>大厅在线 <strong id="match-total">—</strong> 人</span><small>约 1 分钟内活跃</small>`;
+  const stats=make('div','match-summary');stats.innerHTML=`<span class="match-summary-icon">${iconSvg('people')}</span><span>大厅在线 <strong id="match-total">—</strong> 人</span><small>约 1 分钟内活跃</small><a class="match-online-link" href="#online">看看谁在线 →</a>`;
   const modes=make('div','match-modes');modes.id='match-modes';
   for(const [game,name] of Object.entries(names)){
     const button=make('button','match-mode');button.type='button';button.dataset.matchGame=game;
@@ -130,5 +135,50 @@ async function route(){
   countsTimer=setInterval(refreshCounts,5000);
 }
 window.addEventListener('hashchange',route);
+function renderOnlineShell(){
+  onlineContent.replaceChildren();
+  const head=make('div','club-heading');head.innerHTML='<span class="eyebrow">WHO IS HERE</span><h1>在线玩家</h1><p>看看此刻谁也在青蛙游戏厅。</p>';
+  const summary=make('section','online-summary');summary.innerHTML=`<span class="online-summary-icon">${iconSvg('people')}</span><div><strong id="online-page-total">—</strong><span>人在线</span><p id="online-page-breakdown">正在读取…</p></div><a href="#match">去快速匹配 →</a>`;
+  const title=make('div','online-list-heading');title.append(make('h2','','已登录的玩家'));
+  const refresh=make('button','online-refresh','刷新名单');refresh.type='button';refresh.addEventListener('click',()=>refreshOnline());title.append(refresh);
+  const note=make('p','online-note','最近约 1 分钟有活动的玩家会显示在这里；游客仅计入人数。');
+  const list=make('div','online-player-list');list.id='online-player-list';list.setAttribute('aria-live','polite');
+  const status=make('p','online-status','正在加载在线名单…');status.id='online-status';status.setAttribute('role','status');
+  onlineContent.append(head,summary,title,note,list,status);
+}
+function showOnlinePlayers(data){
+  onlineContent.querySelector('#online-page-total').textContent=String(data.total);
+  onlineContent.querySelector('#online-page-breakdown').textContent=`已登录 ${data.registered} 人 · 游客 ${data.guests} 人`;
+  const list=onlineContent.querySelector('#online-player-list');list.replaceChildren();
+  if(!data.players.length){list.append(make('p','online-empty','暂时没有登录玩家在线。'));return;}
+  const ownId=user?.id;
+  for(const player of data.players){
+    const card=make('article','online-player-card');
+    const avatar=make('img','online-player-avatar');avatar.src=`/api/avatars/${player.id}`;avatar.alt='';avatar.loading='lazy';avatar.onerror=()=>{avatar.onerror=null;avatar.src='./assets/default-frog-avatar.svg';};
+    const detail=make('div','online-player-detail');detail.append(make('strong','',player.username+(player.id===ownId?' · 你':'')),make('span','',player.game&&names[player.game]?`正在看「${names[player.game]}」匹配`:'在游戏厅里'));
+    const badge=make('span','online-player-badge','在线');card.append(avatar,detail,badge);list.append(card);
+  }
+  if(data.remaining)list.append(make('p','online-more',`还有 ${data.remaining} 位玩家在线`));
+}
+async function refreshOnline(id=onlineRouteId){
+  if(onlinePage.hidden||id!==onlineRouteId)return;
+  const refreshId=++onlineRefreshId;
+  const refresh=onlineContent.querySelector('.online-refresh'),status=onlineContent.querySelector('#online-status');refresh.disabled=true;status.textContent='正在更新名单…';
+  try{
+    await presence();const [data,session]=await Promise.all([api('presence/players'),api('session')]);
+    if(onlinePage.hidden||id!==onlineRouteId||refreshId!==onlineRefreshId)return;
+    user=session.user;
+    showOnlinePlayers(data);status.textContent='名单已更新';
+  }catch(error){if(!onlinePage.hidden&&id===onlineRouteId&&refreshId===onlineRefreshId)status.textContent=`读取失败：${error.message}`;}
+  finally{if(!onlinePage.hidden&&id===onlineRouteId&&refreshId===onlineRefreshId)refresh.disabled=false;}
+}
+function onlineRoute(){
+  const active=location.hash==='#online',id=++onlineRouteId;clearInterval(onlineTimer);onlineTimer=0;onlinePage.hidden=!active;
+  if(!active)return;
+  document.querySelector('#lobby').hidden=true;document.querySelector('#game-screen').hidden=true;document.querySelector('#club-page').hidden=true;
+  renderOnlineShell();
+  refreshOnline(id);onlineTimer=setInterval(()=>refreshOnline(id),10000);
+}
+window.addEventListener('hashchange',onlineRoute);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden){presence();if(!page.hidden)pollQueue();}});
-setInterval(presence,25000);route();
+setInterval(presence,25000);route();onlineRoute();

@@ -89,6 +89,13 @@ export async function handleApi(request, env) {
       for(const row of await all("SELECT game,count(*) AS n FROM match_queue WHERE status='waiting' AND last_seen>=? GROUP BY game",queueCutoff))if(row.game in waiting)waiting[row.game]=row.n;
       return {total,online,waiting};
     }
+    async function onlinePlayers(){
+      const cutoff=Date.now()-70000;
+      const guests=(await first('SELECT count(*) AS n FROM online_presence WHERE last_seen>=? AND user_id IS NULL',cutoff)).n;
+      const registered=(await first('SELECT count(*) AS n FROM online_presence p JOIN users u ON u.id=p.user_id WHERE p.last_seen>=? AND u.banned=0',cutoff)).n;
+      const players=await all('SELECT u.id,u.username,p.game FROM online_presence p JOIN users u ON u.id=p.user_id WHERE p.last_seen>=? AND u.banned=0 ORDER BY p.last_seen DESC,u.id LIMIT 100',cutoff);
+      return {total:guests+registered,guests,registered,players,remaining:Math.max(0,registered-players.length)};
+    }
     async function queueState(){
       const row=await first('SELECT game,status,room_code FROM match_queue WHERE user_id=?',user.id);
       return row?{game:row.game,status:row.status,roomCode:row.room_code}:null;
@@ -120,6 +127,7 @@ export async function handleApi(request, env) {
       }
     }
     if(path==='/api/presence'&&method==='GET')return json(await presenceState());
+    if(path==='/api/presence/players'&&method==='GET')return json(await onlinePlayers());
     if(path==='/api/presence'&&method==='POST'){
       const data=await body(request),visitorId=data.visitorId,game=data.game||null;
       if(!/^[a-f0-9]{32}$/.test(visitorId)||game!==null&&!matchGames.includes(game))fail(400,'在线状态无效');
