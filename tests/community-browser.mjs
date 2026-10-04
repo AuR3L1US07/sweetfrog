@@ -9,6 +9,10 @@ try {
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto(base + '#suggestions');
   await page.locator('.club-heading h1').getByText('意见留言').waitFor();
+  assert.equal(await page.locator('.club-form').count(),0);
+  assert.equal(await page.locator('.idea-list').isVisible(),true);
+  await page.getByRole('link',{name:'有好点子？写下建议 ↗'}).click();
+  await page.waitForURL('**/#suggestions/new');
   assert.match(await page.locator('.club-gate').textContent(), /登录后可以发布建议/);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   assert.match(await page.locator('#sound-toggle').textContent(),/声音开/);
@@ -44,6 +48,9 @@ try {
   const playerId=Number((await page.locator('#account-chip').textContent()).match(/ID (\d+)/)[1]);
   assert.match((await page.request.get(base+`api/avatars/${playerId}`)).headers()['content-type'],/image\/webp|image\/jpeg/);
   await page.goto(base + '#suggestions');
+  assert.equal(await page.locator('.club-form').count(),0);
+  await page.getByRole('link',{name:'有好点子？写下建议 ↗'}).click();
+  await page.waitForURL('**/#suggestions/new');
   const suggestionTitle = '测试提议' + username;
   await page.locator('.club-form [name=title]').fill(suggestionTitle);
   await page.locator('.club-form [name=body]').fill('可以加一个倒计时提示。');
@@ -58,6 +65,9 @@ try {
   await page.locator('.idea-card .forum-title').filter({ hasText: suggestionTitle }).click();
   await page.getByRole('heading', { name: suggestionTitle }).waitFor();
   await page.goto(base + '#discussion');
+  assert.equal(await page.locator('.club-form').count(),0);
+  await page.getByRole('link',{name:'有话想聊？发起话题 ↗'}).click();
+  await page.waitForURL('**/#discussion/new');
   const topicTitle = '测试话题' + username;
   await page.locator('.club-form [name=title]').fill(topicTitle);
   await page.locator('.club-form [name=body]').fill('大家最喜欢哪个游戏？');

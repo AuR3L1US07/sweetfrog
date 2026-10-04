@@ -37,13 +37,25 @@ function sectionTop(content,type){
 function compose(content,type){
   const isIdea=type==='suggestions';
   const action=isIdea?'发布建议':'发布帖子';
+  const back=el('a','forum-back',isIdea?'← 返回建议列表':'← 返回帖子列表');back.href='#'+type;content.append(back);
   const panel=el('section','forum-compose');
   const top=el('div','forum-compose-head');top.append(el('div','forum-compose-symbol',isIdea?'✦':'#'),el('div','forum-compose-copy'));
-  top.lastChild.append(el('strong','',isIdea?'写一篇建议':'发一篇帖子'),el('p','',isIdea?'把想改进的地方讲清楚。':'把你想聊的话题发出来。'));
+  top.lastChild.append(el('strong','',isIdea?'写下你的建议':'发起一个话题'),el('p','',isIdea?'说说你希望怎样改进。':'分享一个想法，邀请大家一起聊。'));
   panel.append(top);
   if(user){const editor=form(action+' ↗',isIdea?500:2000,data=>request(isIdea?'/api/suggestions':'/api/topics',{method:'POST',body:JSON.stringify(data)}),result=>{location.hash=(isIdea?'suggestions/':'discussion/')+result.id;});editor.querySelector('[name=title]').placeholder=isIdea?'用一句话概括建议':'给帖子起个标题';editor.querySelector('[name=body]').placeholder=isIdea?'具体希望怎样改进？':'写下你的想法…';panel.append(editor);}
   else panel.append(gate(isIdea?'登录后可以发布建议和点赞。':'登录后可以发帖和回复。'));
   content.append(panel);
+}
+function composePage(content,type){
+  const isIdea=type==='suggestions';
+  content.append(heading(isIdea?'SHARE AN IDEA':'START A DISCUSSION',isIdea?'提出建议':'发起话题',isIdea?'让好点子被看见，也让大家一起点赞。':'想聊游戏、晒成绩，还是问问大家？'));
+  compose(content,type);
+}
+function listAction(type){
+  const isIdea=type==='suggestions';
+  const action=el('a','forum-create-action',isIdea?'有好点子？写下建议 ↗':'有话想聊？发起话题 ↗');
+  action.href='#'+type+'/new';
+  return action;
 }
 function voteButton(item){
   const vote=makeButton(`▲ ${item.votes}`,async()=>{
@@ -56,16 +68,16 @@ function voteButton(item){
   if(item.voted)vote.title='你已经点过赞';return vote;
 }
 async function suggestions(content){
-  sectionTop(content,'suggestions');compose(content,'suggestions');
-  const bar=el('div','forum-list-bar');bar.append(el('h2','','建议列表'),el('span','','按点赞排序'));content.append(bar);
+  sectionTop(content,'suggestions');
+  const bar=el('div','forum-list-bar');const label=el('div','forum-list-label');label.append(el('h2','','建议列表'),el('span','','按点赞排序'));bar.append(label,listAction('suggestions'));content.append(bar);
   const list=el('div','club-list idea-list');content.append(list);list.append(notice('正在读取建议…'));
   try{const {items}=await request('/api/suggestions');list.replaceChildren();if(!items.length)list.append(notice('还没有建议，来发布第一篇吧。'));
     for(const item of items){const card=el('article','club-card idea-card');const body=el('div','club-card-content');const link=el('a','forum-title',item.title);link.href='#suggestions/'+item.id;body.append(postMeta(item),link,el('p','forum-excerpt',item.body));const footer=el('div','forum-row-footer');footer.append(el('span','','建议 · '+time(item.createdAt)),el('a','forum-open','查看建议 →'));footer.lastChild.href=link.href;body.append(footer);card.append(voteButton(item),body);list.append(card);}
   }catch(error){list.replaceChildren(notice(friendlyError(error)));}
 }
 async function discussion(content){
-  sectionTop(content,'discussion');compose(content,'discussion');
-  const bar=el('div','forum-list-bar');bar.append(el('h2','','全部帖子'),el('span','','最新发布'));content.append(bar);
+  sectionTop(content,'discussion');
+  const bar=el('div','forum-list-bar');const label=el('div','forum-list-label');label.append(el('h2','','全部帖子'),el('span','','最新发布'));bar.append(label,listAction('discussion'));content.append(bar);
   const list=el('div','club-list forum-list');content.append(list);list.append(notice('正在读取帖子…'));
   try{const {items}=await request('/api/topics');list.replaceChildren();if(!items.length)list.append(notice('还没有帖子，来发第一篇吧。'));
     for(const item of items){const card=el('article','club-card topic-card');const body=el('div','club-card-content');const link=el('a','forum-title',item.title);link.href='#discussion/'+item.id;body.append(postMeta(item),link,el('p','forum-excerpt',item.body));const footer=el('div','forum-row-footer');footer.append(el('span','forum-reply-count',`${item.replyCount} 条回复`),el('a','forum-open','进入讨论 →'));footer.lastChild.href=link.href;body.append(footer);card.append(body);list.append(card);}
@@ -152,7 +164,7 @@ function account(content){
   formNode.addEventListener('submit',async event=>{event.preventDefault();const button=formNode.querySelector('button'),status=formNode.querySelector('[role=status]');button.disabled=true;status.textContent='正在处理…';try{const data=await request('/api/'+accountMode,{method:'POST',body:JSON.stringify({username:formNode.elements.username.value.trim(),password:formNode.elements.password.value})});saveSession(data);location.hash=returnTo;returnTo='games';}catch(error){status.textContent=friendlyError(error);}finally{button.disabled=false;}});
   content.append(formNode);const guest=el('a','guest-link','游客登录 · 先逛逛 →');guest.href='#games';content.append(guest);
 }
-async function renderCurrent(){const route=location.hash.slice(1),detail=/^(suggestions|discussion)\/(\d+)$/.exec(route),base=detail?.[1]||route,visible=routes.has(base);page.hidden=!visible;if(!visible)return;if(base==='account'&&user){location.hash='profile';return;}$('#lobby').hidden=true;$('#game-screen').hidden=true;const content=el('div');content.id='club-content';$('#club-content').replaceWith(content);$('#club-location').textContent={suggestions:'意见留言',discussion:'玩家社区',leaderboard:'排行榜',account:'登录 / 注册',profile:'个人信息'}[base];document.querySelectorAll('[data-club-nav]').forEach(link=>link.classList.toggle('active',link.dataset.clubNav===base));if(detail){if(base==='suggestions')await suggestionDetail(content,detail[2]);else await topicDetail(content,detail[2]);}else if(base==='suggestions')await suggestions(content);else if(base==='discussion')await discussion(content);else if(base==='leaderboard')await leaderboard(content);else if(base==='profile')await profile(content);else account(content);}
+async function renderCurrent(){const route=location.hash.slice(1),detail=/^(suggestions|discussion)\/(new|\d+)$/.exec(route),base=detail?.[1]||route,visible=routes.has(base);page.hidden=!visible;if(!visible)return;if(base==='account'&&user){location.hash='profile';return;}$('#lobby').hidden=true;$('#game-screen').hidden=true;const content=el('div');content.id='club-content';$('#club-content').replaceWith(content);$('#club-location').textContent={suggestions:'意见留言',discussion:'玩家社区',leaderboard:'排行榜',account:'登录 / 注册',profile:'个人信息'}[base];document.querySelectorAll('[data-club-nav]').forEach(link=>link.classList.toggle('active',link.dataset.clubNav===base));if(detail){if(detail[2]==='new')composePage(content,base);else if(base==='suggestions')await suggestionDetail(content,detail[2]);else await topicDetail(content,detail[2]);}else if(base==='suggestions')await suggestions(content);else if(base==='discussion')await discussion(content);else if(base==='leaderboard')await leaderboard(content);else if(base==='profile')await profile(content);else account(content);}
 window.addEventListener('hashchange',renderCurrent);
 window.addEventListener('sweetfrog:finished',async event=>{if(!user)return;const {game,score}=event.detail;if(!games[game])return;try{await request(`/api/leaderboards/${game}`,{method:'POST',body:JSON.stringify({score})});}catch(error){console.warn('成绩提交失败:',friendlyError(error));}});
 await refreshSession();syncAdminLink();renderCurrent();
