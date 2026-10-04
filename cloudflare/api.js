@@ -137,6 +137,101 @@ export async function handleApi(request, env) {
       await run('INSERT INTO online_presence(client_key,user_id,game,last_seen) VALUES(?,?,?,?) ON CONFLICT(client_key) DO UPDATE SET game=excluded.game,last_seen=excluded.last_seen',key,user?.id||null,game,now);
       return json(await presenceState());
     }
+    const friendPair=otherId=>[Math.min(user.id,otherId),Math.max(user.id,otherId)];
+    const friendship=async otherId=>first('SELECT status,requester_id AS requesterId,updated_at AS updatedAt FROM friend_links WHERE user_low=? AND user_high=?',...friendPair(otherId));
+    async function friendSummary(){
+      const friends=await all(`SELECT u.id,u.username,EXISTS(SELECT 1 FROM online_presence p WHERE p.user_id=u.id AND p.last_seen>=?) AS online,(SELECT count(*) FROM friend_messages m WHERE m.sender_id=u.id AND m.recipient_id=? AND m.read_at IS NULL) AS unread FROM friend_links f JOIN users u ON u.id=CASE WHEN f.user_low=? THEN f.user_high ELSE f.user_low END WHERE (f.user_low=? OR f.user_high=?) AND f.status='accepted' AND u.banned=0 ORDER BY online DESC,u.username COLLATE NOCASE`,Date.now()-70000,user.id,user.id,user.id,user.id);
+      const requests=await all(`SELECT u.id,u.username,f.requester_id AS requesterId FROM friend_links f JOIN users u ON u.id=CASE WHEN f.user_low=? THEN f.user_high ELSE f.user_low END WHERE (f.user_low=? OR f.user_high=?) AND f.status='pending' AND u.banned=0 ORDER BY f.updated_at DESC LIMIT 100`,user.id,user.id,user.id);
+      return {self:{id:user.id,username:user.username},friends,incoming:requests.filter(item=>item.requesterId!==user.id),outgoing:requests.filter(item=>item.requesterId===user.id),unread:friends.reduce((sum,item)=>sum+item.unread,0)};
+    }
+    if(path==='/api/friends'&&method==='GET'){requireUser();return json(await friendSummary());}
+    if(path==='/api/friends/search'&&method==='GET'){
+      requireUser();await rate(`friend-search:${user.id}`,120);
+      const query=text(new URL(request.url).searchParams.get('q'),20);
+      if(!query||query.length>20)fail(400,'请输入玩家昵称或 ID');
+      const matches=await all(`SELECT u.id,u.username,f.status,f.requester_id AS requesterId FROM users u LEFT JOIN friend_links f ON f.user_low=min(?,u.id) AND f.user_high=max(?,u.id) WHERE u.id<>? AND u.banned=0 AND (u.id=? OR instr(lower(u.username),lower(?))=1) ORDER BY CASE WHEN u.id=? OR lower(u.username)=lower(?) THEN 0 ELSE 1 END,u.username LIMIT 12`,user.id,user.id,user.id,/^\d+$/.test(query)?Number(query):-1,query,/^\d+$/.test(query)?Number(query):-1,query);
+      return json({self:{id:user.id},players:matches});
+    }
+    if(path==='/api/friends/requests'&&method==='POST'){
+      requireUser();await rate(`friend-request:${user.id}`,30);
+      const targetId=(await body(request)).userId;
+      if(!Number.isSafeInteger(targetId)||targetId<1||targetId===user.id)fail(400,'请选择其他玩家');
+      if(!await first('SELECT id FROM users WHERE id=? AND banned=0',targetId))fail(404,'玩家不存在');
+      const [low,high]=friendPair(targetId),now=Date.now();
+      const result=await run(`INSERT INTO friend_links(user_low,user_high,requester_id,status,updated_at) VALUES(?,?,?,'pending',?) ON CONFLICT(user_low,user_high) DO UPDATE SET requester_id=excluded.requester_id,status='pending',updated_at=excluded.updated_at WHERE friend_links.status='declined' AND friend_links.updated_at<?`,low,high,user.id,now,now-86400000);
+      if(!result.meta.changes)fail(409,'已有好友关系或申请；被拒绝后需等待一天再申请');
+      return json({ok:true},201);
+    }
+    const requestDecision=/^\/api\/friends\/requests\/(\d+)$/.exec(path);
+    if(requestDecision&&method==='POST'){
+      requireUser();const otherId=Number(requestDecision[1]),decision=(await body(request)).decision;
+      if(!['accept','decline','cancel'].includes(decision)||!Number.isSafeInteger(otherId)||otherId===user.id)fail(400,'申请操作无效');
+      const [low,high]=friendPair(otherId),relation=await friendship(otherId);
+      if(!relation||relation.status!=='pending')fail(409,'申请已处理');
+      if(decision==='cancel'&&relation.requesterId!==user.id||decision!=='cancel'&&relation.requesterId===user.id)fail(403,'不能处理这份申请');
+      const result=decision==='cancel'
+        ?await run("DELETE FROM friend_links WHERE user_low=? AND user_high=? AND status='pending' AND requester_id=?",low,high,user.id)
+        :await run("UPDATE friend_links SET status=?,updated_at=? WHERE user_low=? AND user_high=? AND status='pending' AND requester_id=?",decision==='accept'?'accepted':'declined',Date.now(),low,high,otherId);
+      if(!result.meta.changes)fail(409,'申请已处理');return json({ok:true});
+    }
+    const friendRemoval=/^\/api\/friends\/(\d+)$/.exec(path);
+    if(friendRemoval&&method==='DELETE'){
+      requireUser();const otherId=Number(friendRemoval[1]);if(!Number.isSafeInteger(otherId)||otherId===user.id)fail(400,'好友无效');
+      const result=await run("DELETE FROM friend_links WHERE user_low=? AND user_high=? AND status='accepted'",...friendPair(otherId));
+      if(!result.meta.changes)fail(404,'好友关系不存在');return json({ok:true});
+    }
+    const messagePath=/^\/api\/friends\/(\d+)\/messages$/.exec(path);
+    if(messagePath){
+      requireUser();const otherId=Number(messagePath[1]);
+      if(!Number.isSafeInteger(otherId)||otherId===user.id||(await friendship(otherId))?.status!=='accepted')fail(403,'只有好友可以私信');
+      if(method==='GET'){
+        const after=Number(new URL(request.url).searchParams.get('after')||0);
+        if(!Number.isSafeInteger(after)||after<0)fail(400,'消息位置无效');
+        await run('UPDATE friend_messages SET read_at=? WHERE sender_id=? AND recipient_id=? AND read_at IS NULL',Date.now(),otherId,user.id);
+        const messages=after
+          ?await all('SELECT id,sender_id AS senderId,recipient_id AS recipientId,body,created_at AS createdAt,read_at AS readAt FROM friend_messages WHERE ((sender_id=? AND recipient_id=?) OR (sender_id=? AND recipient_id=?)) AND id>? ORDER BY id ASC LIMIT 100',user.id,otherId,otherId,user.id,after)
+          :await all('SELECT * FROM (SELECT id,sender_id AS senderId,recipient_id AS recipientId,body,created_at AS createdAt,read_at AS readAt FROM friend_messages WHERE (sender_id=? AND recipient_id=?) OR (sender_id=? AND recipient_id=?) ORDER BY id DESC LIMIT 50) ORDER BY id ASC',user.id,otherId,otherId,user.id);
+        return json({messages});
+      }
+      if(method==='POST'){
+        await rate(`friend-message:${user.id}`,240);
+        const content=text((await body(request)).body,1000);
+        if(!content||content.length>1000)fail(400,'消息长度需为 1–1000 字');
+        const createdAt=Date.now(),result=await first('INSERT INTO friend_messages(sender_id,recipient_id,body,created_at) VALUES(?,?,?,?) RETURNING id',user.id,otherId,content,createdAt);
+        return json({message:{id:result.id,senderId:user.id,recipientId:otherId,body:content,createdAt,readAt:null}},201);
+      }
+    }
+    if(path==='/api/pk/invites'){
+      requireUser();
+      if(method==='GET'){
+        const incoming=await all(`SELECT i.id,i.room_code AS roomCode,i.from_user AS fromUser,u.username,r.game FROM pk_invites i JOIN users u ON u.id=i.from_user JOIN pk_rooms r ON r.code=i.room_code WHERE i.to_user=? AND i.status='pending' AND i.created_at>=? AND r.guest_id IS NULL AND r.starts_at IS NULL ORDER BY i.created_at DESC LIMIT 30`,user.id,Date.now()-600000);
+        return json({incoming});
+      }
+      if(method==='POST'){
+        await rate(`pk-invite:${user.id}`,30);const data=await body(request),targetId=data.userId,code=data.code;
+        if(!Number.isSafeInteger(targetId)||targetId<1||targetId===user.id||typeof code!=='string'||!/^[A-HJ-NP-Z2-9]{6}$/.test(code))fail(400,'邀请信息无效');
+        if((await friendship(targetId))?.status!=='accepted')fail(403,'只能邀请好友');
+        const target=await first('SELECT user_id FROM online_presence WHERE user_id=? AND last_seen>=?',targetId,Date.now()-70000);
+        if(!target)fail(409,'好友当前不在线');
+        const inviteRoom=await first('SELECT host_id,guest_id,starts_at,created_at FROM pk_rooms WHERE code=?',code);
+        if(!inviteRoom||inviteRoom.host_id!==user.id||inviteRoom.guest_id||inviteRoom.starts_at||inviteRoom.created_at<Date.now()-86400000)fail(409,'房间已满或无法邀请');
+        const result=await run("INSERT OR IGNORE INTO pk_invites(room_code,from_user,to_user,status,created_at) VALUES(?,?,?,'pending',?)",code,user.id,targetId,Date.now());
+        return json({ok:true,alreadySent:!result.meta.changes},result.meta.changes?201:200);
+      }
+    }
+    const inviteDecision=/^\/api\/pk\/invites\/(\d+)$/.exec(path);
+    if(inviteDecision&&method==='POST'){
+      requireUser();const id=Number(inviteDecision[1]),decision=(await body(request)).decision;
+      if(!Number.isSafeInteger(id)||!['accept','decline'].includes(decision))fail(400,'邀请操作无效');
+      const invite=await first("SELECT i.*,r.guest_id,r.starts_at,r.created_at AS room_created FROM pk_invites i JOIN pk_rooms r ON r.code=i.room_code WHERE i.id=? AND i.to_user=? AND i.status='pending'",id,user.id);
+      if(!invite)fail(404,'邀请不存在或已处理');
+      if(invite.created_at<Date.now()-600000||invite.room_created<Date.now()-86400000||invite.guest_id||invite.starts_at){await run("UPDATE pk_invites SET status='expired' WHERE id=? AND status='pending'",id);fail(409,'邀请已过期');}
+      if(decision==='decline'){await run("UPDATE pk_invites SET status='declined' WHERE id=? AND to_user=? AND status='pending'",id,user.id);return json({ok:true});}
+      const result=await run('UPDATE pk_rooms SET guest_id=? WHERE code=? AND host_id=? AND guest_id IS NULL AND starts_at IS NULL',user.id,invite.room_code,invite.from_user);
+      if(!result.meta.changes)fail(409,'房间已满或已开始');
+      await run("UPDATE pk_invites SET status=CASE WHEN id=? THEN 'accepted' ELSE 'expired' END WHERE room_code=? AND status='pending'",id,invite.room_code);
+      return json({ok:true,roomCode:invite.room_code});
+    }
     if(path==='/api/match/queue'){
       requireUser();const now=Date.now();
       if(method==='POST'){

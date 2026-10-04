@@ -11,7 +11,13 @@ const paths={
   retry:'<path d="M20 11a8 8 0 1 1-2.7-5.8M20 4v5h-5"/>',
   target:'<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 1v4m0 14v4M1 12h4m14 0h4"/>',
   music:'<path d="M10 18V5l10-2v13"/><circle cx="6.5" cy="18" r="3.5"/><circle cx="16.5" cy="16" r="3.5"/>',
-  topic:'<path d="M4 4h16v12H9l-5 4V4Z"/><path d="M8 8h8M8 12h5"/>'
+  topic:'<path d="M4 4h16v12H9l-5 4V4Z"/><path d="M8 8h8M8 12h5"/>',
+  swords:'<path d="m4 4 16 16M14 4l6 6M4 14l6 6M7 17l-3 3M17 7l3-3"/>',
+  note:'<path d="M5 3h11l3 3v15H5V3Z"/><path d="M16 3v4h3M8 11h8M8 15h6"/>',
+  settings:'<path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2" fill="var(--nav-knob,#fff)"/><circle cx="15" cy="12" r="2" fill="var(--nav-knob,#fff)"/><circle cx="10" cy="18" r="2" fill="var(--nav-knob,#fff)"/>',
+  menu:'<path d="M4 7h16M4 12h16M4 17h16"/>',
+  close:'<path d="M5 5 19 19M19 5 5 19"/>',
+  user:'<circle cx="12" cy="8" r="3.5"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/>'
 };
 export function iconSvg(name){return `<svg class="sf-icon sf-icon-${name}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${paths[name]||paths.sparkle}</svg>`;}
 export function hydrateIcons(root=document){root.querySelectorAll('[data-icon]').forEach(node=>{node.innerHTML=iconSvg(node.dataset.icon);});}

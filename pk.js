@@ -22,6 +22,7 @@ let routeId = 0, pollTimer = 0, tickTimer = 0, polling = false, clockOffset = 0;
 let viewCode = '', errorMessage = '';
 let pkLaunched=false,pkResultShown=false,scoreSeq=0,latestScore=null,scoreTimer=0,scoreSending=false,pendingScores=0;
 let resultAnnouncedRound=0,focusedRound=0,rematchBusy=false;
+let inviteListAt=0;
 const token = () => { try { return localStorage.getItem('sweetfrog-session') || ''; } catch { return ''; } };
 const now = () => Date.now() - clockOffset;
 
@@ -75,7 +76,7 @@ function playerCard(label) {
   card.append(avatar,copy,make('strong','pk-player-score','0'));return card;
 }
 function mountRoom(code) {
-  content.replaceChildren();viewCode=code;localScore=null;pendingHits=0;hitBuffer=[];hitSending=false;finalSyncedRound=0;pkLaunched=false;pkResultShown=false;scoreSeq=0;latestScore=null;scoreSending=false;pendingScores=0;resultAnnouncedRound=0;focusedRound=0;rematchBusy=false;
+  content.replaceChildren();viewCode=code;localScore=null;pendingHits=0;hitBuffer=[];hitSending=false;finalSyncedRound=0;pkLaunched=false;pkResultShown=false;scoreSeq=0;latestScore=null;scoreSending=false;pendingScores=0;resultAnnouncedRound=0;focusedRound=0;rematchBusy=false;inviteListAt=0;
   const head=make('div','club-heading');head.innerHTML='<span class="eyebrow">LIVE FRIEND MATCH</span><h1 id="pk-game-title">好友 PK</h1><p id="pk-game-description">正在读取房间选择的游戏…</p>';
   const back=make('a','forum-back','← 返回好友 PK');back.href='#pk';
   const roomCard=make('section','pk-room-card');
@@ -86,6 +87,10 @@ function mountRoom(code) {
   const ready=make('button','pk-main-button pk-ready','准备好了 →');ready.id='pk-ready';ready.type='button';ready.hidden=true;
   ready.addEventListener('click',async()=>{ready.disabled=true;try{const data=await api('/'+code+'/ready',{method:'POST'});applyRoom(data.room);}catch(error){alertText(error.message);ready.disabled=false;}});
   roomCard.append(info,share,players,status,ready);
+  const invitePanel=make('section','pk-invite-panel');invitePanel.id='pk-invite-panel';invitePanel.hidden=true;
+  const inviteHeading=make('div','pk-invite-heading');inviteHeading.append(make('h2','','邀请在线好友'));
+  const refreshInvite=make('button','pk-quiet-button','刷新好友');refreshInvite.type='button';refreshInvite.addEventListener('click',()=>loadInviteFriends(true));inviteHeading.append(refreshInvite);
+  const inviteList=make('div','pk-invite-list');inviteList.id='pk-invite-list';invitePanel.append(inviteHeading,inviteList);
   const game=make('section','pk-game');game.hidden=true;game.id='pk-game';
   const top=make('div','pk-game-top');top.append(make('strong','pk-timer','30.0 秒'),make('span','','D / F / J / K 也能操作'));
   const board=make('div','pk-board');board.id='pk-board';
@@ -98,8 +103,27 @@ function mountRoom(code) {
   const accept=make('button','pk-main-button pk-rematch-accept','同意，再来一局 →');accept.type='button';accept.addEventListener('click',()=>rematchAction('accept'));
   const cancel=make('button','pk-quiet-button','撤回邀约');cancel.type='button';cancel.addEventListener('click',()=>rematchAction('cancel'));
   const actions=make('div','pk-result-actions');actions.append(rematch,accept,cancel);result.append(burst,resultIcon,resultTitle,resultCopy,rematchNote,actions);
-  content.append(head,back,roomCard,game,result,make('p','pk-error',''));
+  content.append(head,back,roomCard,invitePanel,game,result,make('p','pk-error',''));
   content.lastChild.id='pk-error';
+}
+async function loadInviteFriends(force=false){
+  if(!room||room.host.id!==me?.id||room.guest||room.startsAt)return;
+  if(!force&&Date.now()-inviteListAt<20000)return;inviteListAt=Date.now();
+  const code=room.code,list=content.querySelector('#pk-invite-list');if(!list)return;list.replaceChildren(make('p','pk-invite-note','正在查找在线好友…'));
+  try{
+    const response=await fetch('/api/friends',{headers:token()?{Authorization:`Bearer ${token()}`}:{}});
+    const data=await response.json();if(!response.ok)throw Error(data.error||'无法读取好友');
+    if(viewCode!==code||room?.guest||room?.startsAt)return;
+    const online=data.friends.filter(friend=>friend.online);list.replaceChildren();
+    if(!online.length){const note=make('p','pk-invite-note','暂无在线好友。');const link=make('a','','去添加好友 →');link.href='#friends';note.append(link);list.append(note);return;}
+    for(const friend of online){
+      const row=make('div','pk-invite-friend'),avatar=make('img','pk-avatar');avatar.src=`/api/avatars/${friend.id}`;avatar.alt='';avatar.onerror=()=>{avatar.onerror=null;avatar.src='./assets/default-frog-avatar.svg';};
+      const button=make('button','pk-main-button','邀请对战');button.type='button';button.addEventListener('click',async()=>{
+        button.disabled=true;try{const response=await fetch('/api/pk/invites',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${token()}`},body:JSON.stringify({code,userId:friend.id})});const result=await response.json();if(!response.ok)throw Error(result.error||'邀请失败');button.textContent='已邀请，等待接受';}
+        catch(error){alertText(error.message);button.disabled=false;}
+      });row.append(avatar,make('strong','',friend.username),button);list.append(row);
+    }
+  }catch(error){if(viewCode===code)list.replaceChildren(make('p','pk-invite-note',error.message));}
 }
 
 async function rematchAction(decision){
@@ -229,6 +253,7 @@ function applyRoom(next) {
     requestAnimationFrame(()=>content.querySelector('.pk-room-card').scrollIntoView({block:'center',behavior:'instant'}));
   }
   room=next;
+  const invitePanel=content.querySelector('#pk-invite-panel');if(invitePanel){invitePanel.hidden=room.host.id!==me?.id||Boolean(room.guest)||Boolean(room.startsAt);if(!invitePanel.hidden)loadInviteFriends();}
   content.querySelector('#pk-game-title').textContent=games[room.game]+' · PK';
   content.querySelector('#pk-game-description').textContent=room.game==='tap'?'双方同题，30 秒比手速。只点最底下一排的头像。':'两人同时玩「'+games[room.game]+'」，30 秒内分数更高的一方获胜。';
   content.querySelector('.pk-room-game').textContent=games[room.game];

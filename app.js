@@ -35,7 +35,7 @@ window.addEventListener('sweetfrog:pk-result',event=>{
 window.addEventListener('sweetfrog:match-found',()=>{const ctx=ensureAudio();if(!ctx)return;const at=ctx.currentTime+.02;[392,523.25,659.25,783.99].forEach((frequency,index)=>note(frequency,at+index*.11,.33,.045,'triangle'));});
 
 function toast(message) { $('#toast').textContent = message; $('#toast').classList.add('visible'); clearTimeout(toastTimer); toastTimer = setTimeout(() => $('#toast').classList.remove('visible'), 1800); }
-function syncSound(){const toggle=$('#sound-toggle');toggle.innerHTML=iconSvg('music')+`<span>${sound?'声音开':'声音关'}</span>`;toggle.setAttribute('aria-pressed',String(sound));toggle.setAttribute('aria-label',sound?'关闭音乐和音效':'开启音乐和音效');}
+function syncSound(){const toggle=$('#sound-toggle');toggle.innerHTML=iconSvg('music')+'<span class="nav-label">音效</span>';toggle.setAttribute('aria-pressed',String(sound));toggle.setAttribute('aria-label',sound?'关闭音乐和音效':'开启音乐和音效');}
 syncSound();
 $('#sound-toggle').onclick=()=>{sound=!sound;try{localStorage.setItem('sweetfrog-sound',sound?'on':'off');}catch{}syncSound();if(sound){ensureAudio();beep(660,.08);}else audioCtx?.suspend();};
 document.addEventListener('pointerdown',ensureAudio,{once:true});

@@ -145,6 +145,28 @@ try {
     assert.equal((await call(`/api/pk/rooms/${chosenCode}/score`,'POST',{score:50,seq:1,round:1},token))[1].room.host.score,7);
     assert.equal((await call(`/api/pk/rooms/${chosenCode}/hit`,'POST',{col:0,step:0,round:1},token))[0],400);
   }
+  assert.equal((await call(`/api/friends/${admin.user.id}/messages`,'POST',{body:'先打个招呼'},token))[0],403);
+  assert.equal((await call('/api/friends/search?q=testadm','GET',undefined,token))[1].players[0].id,admin.user.id);
+  assert.equal((await call('/api/friends/requests','POST',{userId:admin.user.id},token))[0],201);
+  assert.equal((await call('/api/friends/requests','POST',{userId:admin.user.id},token))[0],409);
+  assert.equal((await call('/api/friends','GET',undefined,admin.token))[1].incoming[0].id,player.user.id);
+  assert.equal((await call(`/api/friends/requests/${player.user.id}`,'POST',{decision:'accept'},admin.token))[0],200);
+  assert.equal((await call('/api/friends','GET',undefined,token))[1].friends[0].id,admin.user.id);
+  const sent=(await call(`/api/friends/${admin.user.id}/messages`,'POST',{body:'一起玩吧'},token))[1].message;
+  assert.equal((await call('/api/friends','GET',undefined,admin.token))[1].unread,1);
+  assert.equal((await call(`/api/friends/${player.user.id}/messages`,'GET',undefined,admin.token))[1].messages[0].body,'一起玩吧');
+  assert.equal((await call('/api/friends','GET',undefined,admin.token))[1].unread,0);
+  assert.equal((await call(`/api/friends/${player.user.id}/messages`,'POST',{body:'好呀'},admin.token))[0],201);
+  assert.equal((await call(`/api/friends/${admin.user.id}/messages?after=${sent.id}`,'GET',undefined,token))[1].messages[0].body,'好呀');
+  const inviteRoom=(await call('/api/pk/rooms','POST',{game:'aim'},token))[1].room;
+  assert.equal((await call('/api/pk/invites','POST',{userId:admin.user.id,code:inviteRoom.code},token))[0],201);
+  const invitation=(await call('/api/pk/invites','GET',undefined,admin.token))[1].incoming[0];
+  assert.equal(invitation.game,'aim');assert.equal(invitation.fromUser,player.user.id);
+  assert.equal((await call(`/api/pk/invites/${invitation.id}`,'POST',{decision:'accept'},admin.token))[1].roomCode,inviteRoom.code);
+  assert.equal((await call(`/api/pk/rooms/${inviteRoom.code}`,'GET',undefined,token))[1].room.guest.id,admin.user.id);
+  assert.equal((await call('/api/pk/invites','GET',undefined,admin.token))[1].incoming.length,0);
+  assert.equal((await call(`/api/friends/${admin.user.id}`,'DELETE',undefined,token))[0],200);
+  assert.equal((await call(`/api/friends/${admin.user.id}/messages`,'GET',undefined,token))[0],403);
   assert.equal((await call('/api/admin/topics/1','DELETE',undefined,admin.token))[0],200);
   assert.equal((await call('/api/topics/1/replies'))[1].items.length,0);
   assert.equal((await call('/api/admin/suggestions/1','DELETE',undefined,admin.token))[0],200);

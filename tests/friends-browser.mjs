@@ -1,0 +1,73 @@
+import assert from 'node:assert/strict';
+import { spawn, execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { mkdtempSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+
+const require=createRequire(import.meta.url),{chromium}=require(process.env.PLAYWRIGHT_MODULE_PATH||'playwright');
+const root=resolve(import.meta.dirname,'..'),state=mkdtempSync(join(tmpdir(),'sweetfrog-friends-browser-'));
+const cli=join(root,'node_modules/wrangler/bin/wrangler.js'),port=44000+Math.floor(Math.random()*10000),base=`http://127.0.0.1:${port}`;
+let server,browser;
+try{
+  execFileSync(process.execPath,[cli,'d1','execute','sweetfrog-db','--local','--persist-to',state,'--file','cloudflare/schema.sql'],{cwd:root,stdio:'pipe'});
+  server=spawn(process.execPath,[cli,'pages','dev','dist','--port',String(port),'--persist-to',state],{cwd:root,stdio:['ignore','pipe','pipe']});
+  let logs='';server.stdout.on('data',chunk=>logs+=chunk);server.stderr.on('data',chunk=>logs+=chunk);
+  let ready=false;for(let i=0;i<120;i++){try{if((await fetch(base+'/api/session')).ok){ready=true;break;}}catch{}await new Promise(resolve=>setTimeout(resolve,250));}
+  assert.ok(ready,logs);
+  const register=async prefix=>{const response=await fetch(base+'/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:prefix+Math.floor(Math.random()*100000),password:'password123'})});assert.equal(response.status,200);return response.json();};
+  const host=await register('friendhost'),guest=await register('friendguest');
+  browser=await chromium.launch({headless:true,channel:'msedge'});
+  const hostPage=await browser.newPage({viewport:{width:1280,height:900}}),guestPage=await browser.newPage({viewport:{width:390,height:850}});
+  const errors=[];for(const page of [hostPage,guestPage])page.on('pageerror',error=>errors.push(error.message));
+  await hostPage.addInitScript(value=>localStorage.setItem('sweetfrog-session',value),host.token);
+  await guestPage.addInitScript(value=>localStorage.setItem('sweetfrog-session',value),guest.token);
+  await hostPage.goto(base+'/#friends');await guestPage.goto(base+'/#friends');
+  await guestPage.locator('#friend-query').fill(host.user.username);
+  await guestPage.getByRole('button',{name:'搜索玩家'}).click();
+  await guestPage.getByText(host.user.username).waitFor();
+  await guestPage.getByRole('button',{name:'加好友'}).click();
+  await guestPage.getByText('申请已发出').waitFor();
+  await hostPage.reload();await hostPage.getByRole('button',{name:'接受',exact:true}).waitFor();
+  await hostPage.getByRole('button',{name:'接受',exact:true}).click();
+  await hostPage.getByRole('link',{name:'发私信'}).waitFor();
+  await guestPage.reload();await guestPage.getByRole('link',{name:'发私信'}).waitFor();
+  await guestPage.getByRole('link',{name:'发私信'}).click();
+  await guestPage.locator('#friend-message-body').fill('今晚一起玩青蛙定位练习？');
+  await guestPage.getByRole('button',{name:'发送',exact:true}).click();
+  await guestPage.getByText('今晚一起玩青蛙定位练习？').waitFor();
+  await hostPage.waitForFunction(()=>!document.querySelector('#friends-badge')?.hidden,{timeout:15000});
+  await hostPage.getByRole('link',{name:'发私信'}).click();
+  await hostPage.getByText('今晚一起玩青蛙定位练习？').waitFor();
+  await hostPage.locator('#friend-message-body').fill('来吧！');
+  await hostPage.getByRole('button',{name:'发送',exact:true}).click();
+  await guestPage.getByText('来吧！').waitFor({timeout:10000});
+  await guestPage.getByRole('button',{name:'展开功能菜单'}).click();
+  await guestPage.locator('.site-header.nav-open').waitFor();
+  await guestPage.waitForFunction(()=>document.querySelector('#site-navigation').getBoundingClientRect().right<=innerWidth+1);
+  const drawerBox=await guestPage.evaluate(()=>{const node=document.querySelector('#site-navigation'),rect=node.getBoundingClientRect();return {left:rect.left,right:rect.right,width:rect.width,viewport:innerWidth,transform:getComputedStyle(node).transform,visibility:getComputedStyle(node).visibility,header:document.querySelector('.site-header').getBoundingClientRect().right};});
+  assert.ok(drawerBox.left>=-1&&drawerBox.right<=drawerBox.viewport+1,JSON.stringify(drawerBox));
+  for(const label of ['大厅','对战','匹配','留言','社区','排行','好友'])assert.equal(await guestPage.locator('.site-header nav .nav-label').filter({hasText:label}).count(),1);
+  await guestPage.screenshot({path:'tests/friends-drawer-mobile.png'});
+  await guestPage.locator('.nav-drawer-head button').click();
+  assert.equal(await guestPage.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  await hostPage.goto(base+'/#pk');await hostPage.locator('input[value="aim"]').check();
+  await hostPage.getByRole('button',{name:'创建房间 →'}).click();
+  await hostPage.waitForURL('**/#pk/*');
+  const code=new URL(hostPage.url()).hash.slice(4);
+  await hostPage.locator('#pk-invite-panel').waitFor({state:'visible'});
+  await hostPage.locator('#pk-invite-panel').getByText(guest.user.username).waitFor();
+  await hostPage.getByRole('button',{name:'邀请对战'}).click();
+  await hostPage.getByText('已邀请，等待接受').waitFor();
+  await guestPage.goto(base+'/#friends');await guestPage.getByRole('button',{name:'接受并进入'}).waitFor();
+  await guestPage.getByRole('button',{name:'接受并进入'}).click();
+  await guestPage.waitForURL('**/#pk/*');assert.equal(new URL(guestPage.url()).hash,'#pk/'+code);
+  await hostPage.locator('.pk-player-name').getByText(guest.user.username).waitFor();
+  assert.deepEqual(errors,[]);
+  console.log('PASS: add friend by name, accept, private chat and reply, mobile drawer, online PK invitation');
+}finally{
+  await browser?.close();
+  if(server){const stopped=new Promise(resolve=>server.once('exit',resolve));server.kill();await stopped;}
+  if(state.startsWith(join(tmpdir(),'sweetfrog-friends-browser-')))await rm(state,{recursive:true,force:true,maxRetries:10,retryDelay:500});
+}

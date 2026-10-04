@@ -13,6 +13,13 @@ CREATE TABLE IF NOT EXISTS online_presence(client_key TEXT PRIMARY KEY, user_id 
 CREATE INDEX IF NOT EXISTS idx_online_presence_seen ON online_presence(last_seen);
 CREATE TABLE IF NOT EXISTS match_queue(user_id INTEGER PRIMARY KEY REFERENCES users(id), game TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'waiting', joined_at INTEGER NOT NULL, last_seen INTEGER NOT NULL, room_code TEXT);
 CREATE INDEX IF NOT EXISTS idx_match_queue_find ON match_queue(game,status,joined_at);
+CREATE TABLE IF NOT EXISTS friend_links(user_low INTEGER NOT NULL REFERENCES users(id), user_high INTEGER NOT NULL REFERENCES users(id), requester_id INTEGER NOT NULL REFERENCES users(id), status TEXT NOT NULL CHECK(status IN ('pending','accepted','declined')), updated_at INTEGER NOT NULL, PRIMARY KEY(user_low,user_high));
+CREATE INDEX IF NOT EXISTS idx_friend_links_high ON friend_links(user_high,status);
+CREATE TABLE IF NOT EXISTS friend_messages(id INTEGER PRIMARY KEY, sender_id INTEGER NOT NULL REFERENCES users(id), recipient_id INTEGER NOT NULL REFERENCES users(id), body TEXT NOT NULL, created_at INTEGER NOT NULL, read_at INTEGER);
+CREATE INDEX IF NOT EXISTS idx_friend_messages_inbox ON friend_messages(recipient_id,sender_id,id);
+CREATE TABLE IF NOT EXISTS pk_invites(id INTEGER PRIMARY KEY, room_code TEXT NOT NULL REFERENCES pk_rooms(code), from_user INTEGER NOT NULL REFERENCES users(id), to_user INTEGER NOT NULL REFERENCES users(id), status TEXT NOT NULL CHECK(status IN ('pending','accepted','declined','expired')), created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_pk_invites_inbox ON pk_invites(to_user,status,created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pk_invites_pending ON pk_invites(room_code,to_user) WHERE status='pending';
 CREATE INDEX IF NOT EXISTS idx_suggestions_created ON suggestions(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_topics_created ON topics(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_scores_game_score ON scores(game,score DESC);
