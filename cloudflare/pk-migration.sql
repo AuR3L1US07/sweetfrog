@@ -1,0 +1,2 @@
+CREATE TABLE IF NOT EXISTS pk_rooms(code TEXT PRIMARY KEY, host_id INTEGER NOT NULL REFERENCES users(id), guest_id INTEGER REFERENCES users(id), host_ready INTEGER NOT NULL DEFAULT 0, guest_ready INTEGER NOT NULL DEFAULT 0, host_score INTEGER NOT NULL DEFAULT 0, guest_score INTEGER NOT NULL DEFAULT 0, host_last_hit INTEGER NOT NULL DEFAULT 0, guest_last_hit INTEGER NOT NULL DEFAULT 0, seed INTEGER NOT NULL, starts_at INTEGER, created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_pk_rooms_created ON pk_rooms(created_at);

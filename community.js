@@ -13,6 +13,7 @@ for(const [route,label] of [['suggestions','意见留言'],['discussion','玩家
 const rankLink=el('a','game-rank-link','查看本游戏排行榜 ↗');rankLink.href='#leaderboard';$('#game-screen .play-footer').before(rankLink);
 let token='';try{token=localStorage.getItem('sweetfrog-session')||'';}catch{}
 let user=null,rankGame='tap',accountMode='login',returnTo='games',accountMessage='',avatarVersion=0;
+window.addEventListener('sweetfrog:login-return',event=>{if(typeof event.detail==='string'&&/^pk(?:\/[A-HJ-NP-Z2-9]{6})?$/.test(event.detail))returnTo=event.detail;});
 const friendlyError=error=>error.message||'暂时连接不上服务器，请稍后重试。';
 async function request(path,options={}){
   return communityRequest(path,options,token);

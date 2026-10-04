@@ -4,7 +4,7 @@ const root = resolve(import.meta.dirname, '..');
 const out = join(root, 'dist');
 await rm(out, { recursive:true, force:true });
 await mkdir(out, { recursive:true });
-for (const file of ['index.html','admin.html','styles.css','theme.css','hero-play.css','community.css','admin.css','admin.js','app.js','hero-play.js','aim.js','aim-core.js','core.js','community.js','community-transport.js','community-config.js','firebase-config.js','firebase-adapter.js']) {
+for (const file of ['index.html','admin.html','styles.css','theme.css','hero-play.css','community.css','pk.css','admin.css','admin.js','app.js','hero-play.js','pk.js','pk-core.js','aim.js','aim-core.js','core.js','community.js','community-transport.js','community-config.js','firebase-config.js','firebase-adapter.js']) {
   await copyFile(join(root,file),join(out,file));
 }
 await cp(join(root,'assets'),join(out,'assets'),{recursive:true});

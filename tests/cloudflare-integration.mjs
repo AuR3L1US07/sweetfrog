@@ -4,6 +4,7 @@ import { mkdtempSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { pkRows } from '../pk-core.js';
 const root=resolve(import.meta.dirname,'..');
 const state=mkdtempSync(join(tmpdir(),'sweetfrog-d1-test-'));
 const cli=join(root,'node_modules/wrangler/bin/wrangler.js');
@@ -65,6 +66,28 @@ try {
   const [,admin]=await call('/api/register','POST',{username:'testadmin',password:'adminPassword123'});
   wrangler(['d1','execute','sweetfrog-db','--local','--persist-to',state,'--command',"UPDATE users SET role='admin' WHERE username='testadmin'"]);
   assert.equal((await call('/api/admin/overview','GET',undefined,admin.token))[1].users,2);
+  assert.equal((await call('/api/pk/rooms','POST',{}))[0],401);
+  const [roomStatus,createdRoom]=await call('/api/pk/rooms','POST',{},token);
+  assert.equal(roomStatus,201);
+  const code=createdRoom.room.code;
+  assert.match(code,/^[A-HJ-NP-Z2-9]{6}$/);
+  assert.equal(createdRoom.room.phase,'waiting');
+  assert.equal((await call(`/api/pk/rooms/${code}`))[0],401);
+  assert.equal((await call(`/api/pk/rooms/${code}/ready`,'POST',{},token))[0],409);
+  assert.equal((await call(`/api/pk/rooms/${code}/join`,'POST',{},admin.token))[1].room.guest.id,admin.user.id);
+  assert.equal((await call(`/api/pk/rooms/${code}/ready`,'POST',{},token))[1].room.phase,'ready');
+  const started=(await call(`/api/pk/rooms/${code}/ready`,'POST',{},admin.token))[1].room;
+  assert.equal(started.phase,'countdown');
+  assert.ok(started.startsAt>started.serverNow);
+  await new Promise(resolve=>setTimeout(resolve,3650));
+  const target=pkRows(started.seed,0)[4];
+  assert.equal((await call(`/api/pk/rooms/${code}/hit`,'POST',{col:(target+1)%4,step:0},token))[1].correct,false);
+  assert.equal((await call(`/api/pk/rooms/${code}/hit`,'POST',{col:target,step:0},token))[1].room.host.score,1);
+  assert.equal((await call(`/api/pk/rooms/${code}/hit`,'POST',{col:target,step:0},token))[0],409);
+  wrangler(['d1','execute','sweetfrog-db','--local','--persist-to',state,'--command',`UPDATE pk_rooms SET starts_at=${Date.now()-31000} WHERE code='${code}'`]);
+  const finished=(await call(`/api/pk/rooms/${code}`,'GET',undefined,token))[1].room;
+  assert.equal(finished.phase,'finished');
+  assert.equal(finished.winnerId,player.user.id);
   assert.equal((await call('/api/admin/topics/1','DELETE',undefined,admin.token))[0],200);
   assert.equal((await call('/api/topics/1/replies'))[1].items.length,0);
   assert.equal((await call('/api/admin/suggestions/1','DELETE',undefined,admin.token))[0],200);
@@ -93,7 +116,7 @@ try {
   assert.equal((await call('/api/profile/password','POST',{currentPassword:'adminPassword123',newPassword:'adminPassword123'},admin.token))[0],400);
   assert.equal((await call('/api/profile/password','POST',{currentPassword:'adminPassword123',newPassword:'changedPassword456!'},admin.token))[0],200);
   assert.equal((await call('/api/session','GET',undefined,admin.token))[1].user,null);
-  console.log('Cloudflare workerd/D1 integration passed: guest, auth, unique votes, replies, five rankings, admin, bans, logout, rate limits.');
+  console.log('Cloudflare workerd/D1 integration passed: guest, auth, community, rankings, two-player PK, admin, bans, logout, rate limits.');
 } finally {
   if(child) { const exited=new Promise(r=>child.once('exit',r)); child.kill(); await exited; }
   // Only remove the specific test directory created above inside the OS temp directory.

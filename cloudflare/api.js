@@ -1,3 +1,5 @@
+import { PK_DURATION_MS, pkRows } from '../pk-core.js';
+
 const encode = new TextEncoder();
 const hex = bytes => Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, '0')).join('');
 const random = size => hex(crypto.getRandomValues(new Uint8Array(size)));
@@ -140,6 +142,63 @@ export async function handleApi(request, env) {
         ]);
         return json({ok:true});
       }
+    }
+
+    const roomPath=/^\/api\/pk\/rooms\/([A-HJ-NP-Z2-9]{6})(?:\/(join|ready|hit))?$/.exec(path);
+    const roomQuery=`SELECT r.*,h.username AS host_name,g.username AS guest_name FROM pk_rooms r JOIN users h ON h.id=r.host_id LEFT JOIN users g ON g.id=r.guest_id WHERE r.code=?`;
+    const getRoom=code=>first(roomQuery,code);
+    function roomState(room,now=Date.now()) {
+      const phase=!room.guest_id?'waiting':!room.starts_at?'ready':now<room.starts_at?'countdown':now<room.starts_at+PK_DURATION_MS?'playing':'finished';
+      return {code:room.code,game:'tap',phase,serverNow:now,startsAt:room.starts_at,endsAt:room.starts_at?room.starts_at+PK_DURATION_MS:null,seed:room.seed,host:{id:room.host_id,name:room.host_name,ready:Boolean(room.host_ready),score:room.host_score},guest:room.guest_id?{id:room.guest_id,name:room.guest_name,ready:Boolean(room.guest_ready),score:room.guest_score}:null,winnerId:phase==='finished'?(room.host_score===room.guest_score?null:room.host_score>room.guest_score?room.host_id:room.guest_id):null,rows:pkRows(room.seed,user?.id===room.host_id?room.host_score:room.guest_score)};
+    }
+    if(method==='POST' && path==='/api/pk/rooms') {
+      requireUser();await rate(`pk-create:${user.id}`,12);
+      await run('DELETE FROM pk_rooms WHERE created_at<?',Date.now()-30*86400000);
+      const alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      for(let attempt=0;attempt<5;attempt++){
+        const code=Array.from(crypto.getRandomValues(new Uint8Array(6)),value=>alphabet[value%alphabet.length]).join('');
+        try{await run('INSERT INTO pk_rooms(code,host_id,seed,created_at) VALUES(?,?,?,?)',code,user.id,crypto.getRandomValues(new Uint32Array(1))[0],Date.now());return json({room:roomState(await getRoom(code))},201);}
+        catch(error){if(!String(error).includes('UNIQUE'))throw error;}
+      }
+      fail(503,'创建房间失败，请重试');
+    }
+    if(roomPath){
+      requireUser();const code=roomPath[1],action=roomPath[2];
+      let room=await getRoom(code);
+      if(!room||room.created_at<Date.now()-86400000)fail(404,'房间不存在或已过期');
+      if(action==='join'&&method==='POST'){
+        if(user.id!==room.host_id&&user.id!==room.guest_id){
+          const result=await run('UPDATE pk_rooms SET guest_id=? WHERE code=? AND guest_id IS NULL AND host_id<>? AND starts_at IS NULL',user.id,code,user.id);
+          if(!result.meta.changes)fail(409,'房间已满或已开始');
+        }
+        return json({room:roomState(await getRoom(code))});
+      }
+      if(user.id!==room.host_id&&user.id!==room.guest_id)fail(404,'房间不存在或已过期');
+      if(!action&&method==='GET')return json({room:roomState(room)});
+      if(action==='ready'&&method==='POST'){
+        if(!room.guest_id)fail(409,'等待朋友加入房间');
+        if(room.starts_at)fail(409,'本局已经开始');
+        const column=user.id===room.host_id?'host_ready':'guest_ready';
+        await run(`UPDATE pk_rooms SET ${column}=1 WHERE code=? AND starts_at IS NULL`,code);
+        const now=Date.now();
+        await run('UPDATE pk_rooms SET starts_at=? WHERE code=? AND host_ready=1 AND guest_ready=1 AND starts_at IS NULL',now+3500,code);
+        return json({room:roomState(await getRoom(code))});
+      }
+      if(action==='hit'&&method==='POST'){
+        const data=await body(request),col=data.col,step=data.step,now=Date.now();
+        if(!Number.isInteger(col)||col<0||col>3||!Number.isInteger(step)||step<0||step>300)fail(400,'操作无效');
+        if(!room.starts_at||now<room.starts_at||now>room.starts_at+PK_DURATION_MS+1200)fail(409,'本局尚未开始或已经结束');
+        const isHost=user.id===room.host_id,scoreColumn=isHost?'host_score':'guest_score',lastColumn=isHost?'host_last_hit':'guest_last_hit';
+        const current=room[scoreColumn];
+        if(step!==current)fail(409,'成绩已更新，请同步房间');
+        if(now-room[lastColumn]<45)fail(429,'点击太快，请稍等片刻');
+        if(pkRows(room.seed,current)[4]!==col)return json({correct:false,room:roomState(room)});
+        const result=await run(`UPDATE pk_rooms SET ${scoreColumn}=${scoreColumn}+1,${lastColumn}=? WHERE code=? AND ${scoreColumn}=? AND starts_at<=? AND starts_at+? >=?`,now,code,current,now,PK_DURATION_MS+1200,now);
+        if(!result.meta.changes)fail(409,'成绩已更新，请同步房间');
+        room=await getRoom(code);
+        return json({correct:true,room:roomState(room)});
+      }
+      fail(405,'请求方法不支持');
     }
 
     const detail=/^\/api\/(suggestions|topics)\/(\d+)$/.exec(path);
