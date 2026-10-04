@@ -1,0 +1,19 @@
+.sr-only{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.mascot-trigger{position:relative;z-index:1;display:flex;align-items:center;justify-content:center;width:390px;max-width:95%;height:400px;padding:0;border:0;background:none;border-radius:48%;touch-action:manipulation;cursor:pointer}
+.mascot-trigger .mascot{width:100%;height:100%;max-width:none;pointer-events:none;transition:filter .22s ease,transform .22s ease}
+.mascot-trigger:hover .mascot{transform:rotate(-2deg) translateY(-7px);filter:drop-shadow(0 24px 22px #327b6b48)}
+.mascot-trigger:active .mascot{transform:rotate(1deg) scale(.96)}
+.mascot-trigger.hopping .mascot{animation:frog-hop .48s ease-out}
+.frog-burst{position:absolute;z-index:3;left:50%;top:46%;pointer-events:none}
+.frog-burst span{position:absolute;color:#63b994;font-size:23px;opacity:0}
+.frog-burst span:nth-child(2n){color:#dfaa65}.frog-burst span:nth-child(3n){color:#8b9cca}
+.frog-burst.active span{animation:frog-spark .65s ease-out both}
+.frog-pick{position:absolute;z-index:4;bottom:15px;left:50%;transform:translateX(-50%);white-space:nowrap;padding:10px 16px;min-height:44px;display:inline-flex;align-items:center;justify-content:center;border-radius:999px;background:#266e5f;color:#fff;font-size:12px;font-weight:800;box-shadow:0 8px 22px #1b66534a;transition:transform .18s,background .18s}
+.frog-pick:hover{background:#1b836f;transform:translateX(-50%) translateY(-3px)}
+.hero-art:has(.frog-pick:not([hidden])) .art-caption{bottom:68px}
+.art-caption{font-family:"Sweet Nunito","Sweet Round",system-ui,sans-serif;font-weight:800;text-align:center}
+@keyframes frog-hop{0%,100%{transform:rotate(-4deg)}38%{transform:rotate(4deg) translateY(-15px) scale(1.045)}70%{transform:rotate(-7deg) translateY(2px) scale(.98)}}
+@keyframes frog-spark{10%{opacity:1}100%{opacity:0;transform:rotate(var(--angle)) translateY(calc(-1 * var(--distance)))}}
+@media(max-width:1000px){.mascot-trigger{height:350px;width:350px}}
+@media(max-width:650px){.mascot-trigger{height:290px;width:300px}.hero-sticker{z-index:3;right:19px;bottom:63px}.frog-pick{bottom:0}.hero-art:has(.frog-pick:not([hidden])) .art-caption{display:none}.art-caption{max-width:210px;line-height:1.5}}
+@media(prefers-reduced-motion:reduce){.mascot-trigger .mascot,.frog-pick{transition:none}.mascot-trigger.hopping .mascot,.frog-burst.active span{animation:none}}
