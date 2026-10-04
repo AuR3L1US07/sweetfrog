@@ -1,57 +1,75 @@
 # Sweetfrog · 朋友游戏厅
 
-五款原创实现的浏览器小游戏：逮住大青蛙、合成大青蛙、青蛙起飞、青蛙2048、青蛙定位练习。
+一个以青蛙和朋友照片为主题的浏览器小游戏网站。可以单人游玩，也可以创建好友房间，或按游戏模式在线匹配对手。
 
-## 玩家账号与社区
+**在线体验：** [sweetfrog.pages.dev](https://sweetfrog.pages.dev/) · [源码仓库](https://github.com/AuR3L1US07/sweetfrog)
 
-网站有独立的意见留言、玩家社区、排行榜三个页面。注册使用玩家昵称和密码；游客可浏览提议、话题和排行榜，登录后才能发布提议、为每条提议点赞一次、发帖回复以及在每款游戏完成后上榜。服务端用 SQLite 保存数据，密码以随机盐和 scrypt 哈希保存，登录令牌在数据库中只存哈希。
+## 玩什么
 
-本地开发需要 Node.js 24：运行 `node server/server.mjs`，访问 `http://127.0.0.1:4175/`。数据默认在 `data/sweetfrog.sqlite`，已被 Git 忽略；可用 `SWEETFROG_DB` 和 `PORT` 环境变量调整。不要把数据库或账号信息提交到 GitHub。
+| 游戏 | 玩法 |
+| --- | --- |
+| 逮住大青蛙 | 点击最底排的照片，或使用 D / F / J / K，限时比手速 |
+| 合成大青蛙 | 投放照片，合并相同等级，尽量别让它们堆过警戒线 |
+| 青蛙起飞 | 点击或按空格控制飞行，穿过水管得分 |
+| 青蛙2048 | 滑动、方向键或屏幕按钮移动方块，合成更大的数字 |
+| 青蛙定位练习 | 点击照片靶，避开青蛙干扰物；可选静态／移动靶和靶子大小 |
 
-GitHub Pages 只能托管静态前端。正式启用账号和跨设备社区前，建议把整个网站与 `server/server.mjs` 一起部署到支持持久磁盘、Node.js 24 和 HTTPS 的服务，保持 `community-config.js` 的 `apiBaseUrl` 为空以使用同源 API。当前 GitHub Pages 的 `main` 分支仍是旧版纯游戏站，新的账号页面暂不发布。浏览器端提交的游戏成绩无法完全防伪，排行榜适合朋友间娱乐，不适合有奖竞赛。
+游戏大厅之外还有这些功能：
 
-管理后台位于 `admin.html`。首次启动服务时设置 `SWEETFROG_ADMIN_USER` 和 `SWEETFROG_ADMIN_PASSWORD`（至少 12 位），服务会创建管理员账号；之后使用该账号在网站登录。管理员可以查看总览、提议、话题与回复、排行榜及账号列表，删除不当内容和异常成绩，并停用或恢复普通玩家账号。不要把管理员密码提交到仓库，也不要把 SQLite 数据库提交或上传到 GitHub Pages。后台 API 会独立校验管理员身份，普通玩家无法通过直接请求调用。
+- **好友 PK：** 登录后创建或加入房间，选择五款游戏之一进行 30 秒对战；双方同意后可以再来一局。
+- **快速匹配：** 查看各模式在线和等待人数，选定游戏后自动寻找对手。大厅在线人数按近期活动统计。
+- **玩家账号：** 注册、登录、修改昵称、密码和头像；未设置头像时显示默认卡通青蛙。
+- **意见留言与玩家社区：** 游客可浏览；登录后可以提交建议、给建议点赞、发帖和回复。
+- **排行榜：** 游客可查看各游戏榜单；登录后完成游戏可提交成绩。个人页面可查看自己的资料。
+- **管理后台：** 管理员可管理建议、帖子、回复、成绩和玩家账号。
 
-未来接入 Firebase 时，保留了 `firebase-config.js` 与 `firebase-adapter.js` 接口。前端统一通过 `community-transport.js` 读取数据；完成适配器实现与 Firebase 安全规则后，可将 `community-config.js` 的 `provider` 改为 `firebase`。当前 Firebase 适配器尚未启用，切换前必须实现注册登录、唯一点赞和管理员授权，不能仅靠网页界面判断权限。
+## 项目如何运行
 
-## 使用
+正式站点使用 **Cloudflare Pages + Pages Functions + D1**。网页、账号和社区数据都在云端运行，访问网站不需要开发者的电脑保持开机。前端通过同源的 `/api` 与后端通信；玩家密码和会话令牌不会以明文存入数据库。
 
-纯游戏可以用静态服务器打开，例如 `python -m http.server 4173`；需测试账号与社区时请使用上面的 Node 服务。GitHub Pages 从 `main` 分支根目录自动发布。
+GitHub `main` 分支保存源码。GitHub Pages 只能托管静态文件，不能单独运行本站的账号、社区和在线对战后端。仓库还保留了用于本地开发的 Node/SQLite 服务，以及尚未启用的 Firebase 接口；当前线上站点使用 Cloudflare。
 
-- 点击挑战：点击最底行头像，或按 D / F / J / K，限时 30 秒；误点扣 2 秒。
-- 合成大青蛙：移动选择落点并点击 / 松手投放；键盘左右移动、空格投放。相同等级合并，等级以色框和数字区分。超过警戒线持续 2 秒结束。
-- 青蛙起飞：点击或空格上升，穿过水管得分。
-- 青蛙2048：滑动、方向键或屏幕按钮移动；相同数字合并，2048 后可继续。
+## 本地运行
 
-最高分保存在当前浏览器的 localStorage。音效默认关闭。切到后台或窗口失焦会暂停，返回后手动继续。
+需要 **Node.js 24 或更高版本**和 **pnpm**。若要体验包含账号与在线对战的完整网站，使用本地 Cloudflare Pages 与 D1：
+
+```sh
+pnpm install
+pnpm run build:pages
+pnpm exec wrangler d1 execute sweetfrog-db --local --persist-to .wrangler/state --file cloudflare/schema.sql
+pnpm exec wrangler pages dev dist --persist-to .wrangler/state --port 8788
+```
+
+打开 `http://127.0.0.1:8788/`。本地 D1 数据保存在被 Git 忽略的 `.wrangler/` 中，不会写入线上数据库。修改网页文件后重新运行 `pnpm run build:pages`，再启动本地预览。
+
+也可以运行 `node server/server.mjs`，在 `http://127.0.0.1:4175/` 使用本地 Node/SQLite 版账号和社区功能。该服务主要用于独立开发，不提供 Cloudflare 版的好友 PK 与快速匹配。本地数据库默认位于 `data/sweetfrog.sqlite`。
+
+## 部署与管理
+
+部署、D1 初始化、已有数据库升级和管理员设置，请看 [Cloudflare 部署指南](cloudflare/DEPLOY.md)。网站后台入口为 [`/admin.html`](https://sweetfrog.pages.dev/admin.html)；需要先将自己的玩家账号设为管理员。
+
+不要将账号密码、API Token、私钥或本地数据库提交到 GitHub。仓库的 `.gitignore` 已排除常见的本地凭据文件与构建产物。排行榜和部分 PK 模式依赖浏览器提交分数，适合朋友间娱乐，不适合用于有奖竞赛。
 
 ## 验证
 
-`node --test tests/core.test.js` 检查 2048 合并与合成物理。`tests/browser-check.mjs` 为 Playwright 浏览器流程检查，需安装 Playwright 并提供浏览器。设置 `PLAYWRIGHT_MODULE_PATH` 可使用非默认安装路径，`BROWSER_CHANNEL` 默认为 `msedge`。
+```sh
+pnpm test
+pnpm run test:cloudflare
+```
 
-## 素材
+Cloudflare 集成测试使用临时本地 D1，不连接正式数据库。浏览器流程测试位于 `tests/*-browser.mjs`，需要 Playwright 和可用的浏览器。
 
-`assets/photo-1.jpg` 至 `photo-5.jpg` 是用户提供的原始照片。照片只在 CSS / Canvas 显示时取景，源文件未修改。`assets/frog-mascot.png` 为本项目生成的吉祥物。生成工具和完整提示词见 `ASSETS.md`。
+## 主要目录
 
-游戏逻辑独立编写，玩法参考点击音游、合成类游戏、Flappy Bird 和 2048；未打包此前推荐仓库中的第三方源码、音效或美术素材。
+| 路径 | 用途 |
+| --- | --- |
+| `index.html`、`app.js`、`aim.js` | 游戏大厅与单人玩法 |
+| `pk.js`、`match.js` | 好友房间与快速匹配页面 |
+| `community.js`、`admin.js` | 账号、社区、排行榜与后台界面 |
+| `cloudflare/api.js`、`cloudflare/schema.sql` | 云端 API 与 D1 数据库结构 |
+| `functions/api/` | Pages Functions 入口 |
+| `server/` | 可选的本地 Node/SQLite 服务 |
+| `assets/` | 青蛙形象、照片与字体 |
+| `tests/` | 逻辑、API 与浏览器测试 |
 
-## 青蛙定位练习
-
-从大厅进入第五款游戏，或访问 `#aim`。静态定位在每次命中后刷新位置；移动追点让靶子持续移动、碰到边缘反弹。五张原始照片在圆形靶子中轮换。
-
-- 三档直径：68 / 50 / 34 像素；训练时长 30 / 60 秒。
-- 3 秒准备倒计时后开始；训练过程中锁定设置，结束或重开后可调整。
-- 每次命中得 100 分，按本次靶子出现至命中的用时再奖励 0–100 分；未命中会打断连击。
-- 显示命中率、平均命中用时、连续命中和总点击数；平均用时不含暂停时间。综合最佳记录不同设置下的最高得分。
-- Esc 或切换窗口暂停，点击继续后恢复。支持鼠标与触屏。这是网页中的二维定位训练，不模拟 FPS 的三维视角或灵敏度。
-- `node --test tests/aim.test.js` 验证命中与计分；`node tests/aim-browser.mjs` 检查完整训练流程（Playwright，默认 Chrome）。
-
-### 青蛙干扰与随机大小
-
-靶子大小默认是随机模式，每个新照片靶的直径在 34–68 像素之间变化；大、中、小固定尺寸继续保留。每轮最多出现两只带红色禁打标记的青蛙，定时换位，且不会遮挡照片圆靶。只打照片，不打青蛙：误击青蛙扣 100 分（最低为 0）、中断连击并计入总点击数，结算显示误击次数。
-
-## 玻璃主题与字体
-
-`theme.css` 保留原有布局和玩法，叠加薄荷、冰蓝、淡紫与蜜桃渐变、半透明玻璃表面和渐变标题。游戏场地继续使用清晰底色。
-
-自带的 `assets/fonts/ZCOOLKuaiLe-Regular.ttf` 用于中文标题，`assets/fonts/Nunito-Variable.ttf` 用于英文和数字；两款字体均来自 Google Fonts，分别附带 `OFL-ZCOOL-KuaiLe.txt` 和 `OFL-Nunito.txt` 许可文件。
+照片素材由项目所有者提供，会作为公开网页资源发布。吉祥物素材说明见 [ASSETS.md](ASSETS.md)；字体许可文件位于 `assets/fonts/`。游戏代码为本项目实现，未打包参考项目的第三方源码或素材。

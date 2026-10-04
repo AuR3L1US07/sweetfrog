@@ -14,7 +14,7 @@
 
 1. Cloudflare → Workers & Pages → Create application → Pages → Connect to Git。
 2. 授权 GitHub，选择 AuR3L1US07/sweetfrog。
-3. 当前部署分支选择 codex/community-admin；此分支包含完整后端。以后合并 main 后可再切换。
+3. 部署分支选择 main；此分支包含完整前端与后端。
 4. Framework preset：None；Build command：npm run build:pages；Build output：dist；根目录保持默认。
 5. 构建环境变量 NODE_VERSION 设置 24，PNPM_VERSION 设置 11.19.0。
 6. 在 D1 → sweetfrog-db → Console 中执行 cloudflare/schema.sql 的完整 SQL。
@@ -30,11 +30,11 @@ pnpm install
 pnpm exec wrangler login
 pnpm exec wrangler d1 execute sweetfrog-db --remote --file cloudflare/schema.sql
 npm run build:pages
-pnpm exec wrangler pages project create sweetfrog --production-branch codex/community-admin
-pnpm exec wrangler pages deploy dist --project-name sweetfrog --branch codex/community-admin
+pnpm exec wrangler pages project create sweetfrog --production-branch main
+pnpm exec wrangler pages deploy dist --project-name sweetfrog --branch main
 ```
 
-若项目已存在，省略 project create。命令行创建的 Direct Upload 项目不能直接切换为 Git 集成项目，需要持续使用命令行部署或单独创建 Git 集成项目。线上部署前须通过下面的测试。
+若项目已存在，省略 project create，并先确认其当前生产分支；如果仍是旧的 `codex/community-admin`，直接用 `--branch main` 可能只生成预览部署。需要在 Cloudflare 中调整生产分支，或在命令中沿用现有生产分支。命令行创建的 Direct Upload 项目不能直接切换为 Git 集成项目，需要持续使用命令行部署或单独创建 Git 集成项目。线上部署前须通过下面的测试。
 
 ## 设置管理员
 
