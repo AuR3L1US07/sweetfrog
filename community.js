@@ -1,5 +1,6 @@
 import { communityRequest } from './community-transport.js';
 import { iconSvg } from './icons.js';
+import { beijingTime } from './beijing-time.js';
 
 const games = { tap:'逮住大青蛙', merge:'合成大青蛙', flap:'青蛙起飞', puzzle:'青蛙2048', aim:'青蛙定位练习' };
 const routes = new Set(['suggestions','discussion','leaderboard','account','profile']);
@@ -23,11 +24,11 @@ async function refreshSession(){if(!token){user=null;return;}try{user=(await req
 function clearSession(){token='';user=null;try{localStorage.removeItem('sweetfrog-session');}catch{}}
 function avatarUrl(id){return id?`/api/avatars/${id}${user?.id===id?`?v=${avatarVersion}`:''}`:'./assets/default-frog-avatar.svg';}
 function memberAvatar(id,name,className='club-avatar'){const img=el('img',className);img.src=avatarUrl(id);img.alt=name?`${name}的头像`:'卡通青蛙头像';img.loading='lazy';img.onerror=()=>{img.onerror=null;img.src='./assets/default-frog-avatar.svg';};return img;}
-function syncAdminLink(){let link=$('#admin-nav-link');if(user?.role==='admin'&&!link){link=el('a','club-nav-link','管理后台');link.id='admin-nav-link';link.href='./admin.html';$('#sound-toggle').before(link);}else if(user?.role!=='admin')link?.remove();const chip=$('#account-chip');chip.href=user?'#profile':'#account';if(user)chip.replaceChildren(memberAvatar(user.id,'','account-chip-avatar'),el('span','account-chip-name',user.username),el('small','',`ID ${user.id}`));else{const symbol=el('span','account-chip-symbol');symbol.innerHTML=iconSvg('user');chip.replaceChildren(symbol,el('span','account-chip-name','登录'));}chip.classList.toggle('signed-in',Boolean(user));chip.setAttribute('aria-label',user?`个人信息：${user.username}，玩家 ID ${user.id}`:'登录或注册');}
+function syncAdminLink(){let link=$('#admin-nav-link');if(user?.role==='admin'&&!link){link=el('a','club-nav-link','管理后台');link.id='admin-nav-link';link.href='./admin.html';$('#sound-toggle').before(link);}else if(user?.role!=='admin')link?.remove();const chip=$('#account-chip');chip.href=user?'#profile':'#account';if(user)chip.replaceChildren(memberAvatar(user.id,'','account-chip-avatar'),el('span','account-chip-name',user.username),el('small','',`ID ${user.publicId}`));else{const symbol=el('span','account-chip-symbol');symbol.innerHTML=iconSvg('user');chip.replaceChildren(symbol,el('span','account-chip-name','登录'));}chip.classList.toggle('signed-in',Boolean(user));chip.setAttribute('aria-label',user?`个人信息：${user.username}，玩家 ID ${user.publicId}`:'登录或注册');}
 function saveSession(data){token=data.token;user=data.user;try{localStorage.setItem('sweetfrog-session',token);}catch{}syncAdminLink();}
 function heading(eyebrow,title,description){const wrap=el('div','club-heading');wrap.innerHTML=`<span class="eyebrow"></span><h1></h1><p></p>`;wrap.querySelector('.eyebrow').textContent=eyebrow;wrap.querySelector('h1').textContent=title;wrap.querySelector('p').textContent=description;return wrap;}
 function notice(message){return el('p','club-notice',message);}
-function time(value){const date=new Date(value.replace(' ','T')+'Z');return Number.isNaN(date.getTime())?'刚刚':new Intl.DateTimeFormat('zh-CN',{month:'numeric',day:'numeric'}).format(date);}
+function time(value){return beijingTime(value);}
 function gate(message){const wrap=el('div','club-gate');wrap.append(el('p','',message));const link=el('a','club-action','登录 / 注册 ↗');link.href='#account';link.addEventListener('click',()=>{returnTo=location.hash.slice(1)||'games';});wrap.append(link);return wrap;}
 function form(label,max,submit,after){const node=el('form','club-form');node.innerHTML=`<label>标题<input name="title" required></label><label>内容<textarea name="body" required rows="4"></textarea></label><button type="submit"></button><p class="club-form-status" role="status"></p>`;node.querySelector('[name=title]').maxLength=80;node.querySelector('[name=body]').maxLength=max;node.querySelector('button').textContent=label;node.addEventListener('submit',async event=>{event.preventDefault();const button=node.querySelector('button'),status=node.querySelector('[role=status]');button.disabled=true;status.textContent='正在发布…';try{const result=await submit({title:node.elements.title.value.trim(),body:node.elements.body.value.trim()});node.reset();status.textContent='发布成功！';if(after)after(result);else await renderCurrent();}catch(error){status.textContent=friendlyError(error);}finally{button.disabled=false;}});return node;}
 function cardHead(item){const head=el('div','club-card-head');head.append(memberAvatar(item.userId,item.username),el('strong','',item.username),el('time','',time(item.createdAt)));return head;}
@@ -132,7 +133,7 @@ async function profile(content){
   if(!user){content.append(gate('请先登录后查看个人信息。'));return;}
   const overview=el('section','profile-overview account-card');
   overview.append(el('span','profile-eyebrow','PLAYER CARD'),el('h2','',user.username));
-  const facts=el('dl','profile-facts');facts.append(el('dt','','玩家 ID'),el('dd','',String(user.id)),el('dt','','账号身份'),el('dd','',user.role==='admin'?'管理员':'玩家'));
+  const facts=el('dl','profile-facts');facts.append(el('dt','','玩家 ID'),el('dd','',String(user.publicId)),el('dt','','账号身份'),el('dd','',user.role==='admin'?'管理员':'玩家'));
   overview.append(facts);content.append(overview);
   const avatarPanel=el('section','profile-avatar-panel');
   const currentAvatar=memberAvatar(user.id,'','profile-avatar');
@@ -146,7 +147,7 @@ async function profile(content){
   avatarForm.append(avatarLabel,saveAvatar,resetAvatar,avatarStatus);
   avatarForm.addEventListener('submit',async event=>{event.preventDefault();const file=fileInput.files?.[0];if(!file){avatarStatus.textContent='请先选择一张图片。';return;}if(!['image/png','image/jpeg','image/webp'].includes(file.type)){avatarStatus.textContent='请选择 PNG、JPG 或 WebP 图片。';return;}saveAvatar.disabled=true;avatarStatus.textContent='正在处理头像…';try{const avatarData=await prepareAvatar(file);await request('/api/profile/avatar',{method:'POST',body:JSON.stringify({avatarData})});avatarVersion++;currentAvatar.src=avatarUrl(user.id);syncAdminLink();fileInput.value='';avatarStatus.textContent='头像已更新。';}catch(error){avatarStatus.textContent=friendlyError(error);}finally{saveAvatar.disabled=false;}});
   avatarControls.append(avatarForm);avatarPanel.append(currentAvatar,avatarControls);content.append(avatarPanel);
-  try{const {profile}=await request('/api/profile');const created=el('p','profile-created','注册时间：'+time(profile.createdAt));overview.append(created);}
+  try{const {profile}=await request('/api/profile');const created=el('p','profile-created','注册时间：'+beijingTime(profile.createdAt,'full')+'（北京时间）');overview.append(created);}
   catch(error){overview.append(notice(friendlyError(error)));}
   const grid=el('div','profile-grid');content.append(grid);
   const nameForm=el('form','profile-panel');nameForm.innerHTML=`<h2>修改用户名</h2><label>新用户名<input name="username" autocomplete="username" minlength="3" maxlength="20" required></label><label>当前密码<input name="currentPassword" type="password" autocomplete="current-password" required></label><button type="submit">保存用户名</button><p role="status"></p>`;

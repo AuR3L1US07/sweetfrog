@@ -3,6 +3,7 @@ import { PK_DURATION_MS, pkRows, pkValidBatch } from '../pk-core.js';
 const encode = new TextEncoder();
 const hex = bytes => Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, '0')).join('');
 const random = size => hex(crypto.getRandomValues(new Uint8Array(size)));
+const randomPlayerId = () => 10000 + crypto.getRandomValues(new Uint32Array(1))[0] % 90000;
 const digest = async value => hex(await crypto.subtle.digest('SHA-256', encode.encode(value)));
 const json = (data, status = 200) => Response.json(data, { status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
 function fail(status, message) { throw Object.assign(new Error(message), { status }); }
@@ -54,7 +55,7 @@ export async function handleApi(request, env) {
     const origin = request.headers.get('origin');
     if (method !== 'GET' && origin && origin !== new URL(request.url).origin) fail(403, '请求来源不允许');
     const token = /^Bearer ([a-f0-9]{64})$/.exec(request.headers.get('authorization') || '')?.[1];
-    const user = token ? await first('SELECT u.id,u.username,u.role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>? AND u.banned=0', await digest(token), Date.now()) : null;
+    const user = token ? await first('SELECT u.id,u.public_id AS publicId,u.username,u.role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>? AND u.banned=0', await digest(token), Date.now()) : null;
     const requireUser = () => { if (!user) fail(401, '请先登录'); };
     async function rate(scope, limit) {
       const key = await digest(scope), now = Date.now();
@@ -67,7 +68,7 @@ export async function handleApi(request, env) {
         statement('DELETE FROM sessions WHERE user_id=? AND expires_at<=?', [account.id, Date.now()]),
         statement('INSERT INTO sessions(token_hash,user_id,expires_at) VALUES(?,?,?)', [await digest(value), account.id, Date.now()+30*86400000])
       ]);
-      return json({ token:value, user:{ id:account.id, username:account.username, role:account.role || 'player' } });
+      return json({ token:value, user:{ id:account.id, publicId:account.publicId, username:account.username, role:account.role || 'player' } });
     }
     const suggestions = () => all(`SELECT s.id,s.title,s.body,s.created_at AS createdAt,u.username,u.id AS userId,(SELECT count(*) FROM suggestion_votes v WHERE v.suggestion_id=s.id) AS votes,EXISTS(SELECT 1 FROM suggestion_votes v WHERE v.suggestion_id=s.id AND v.user_id=?) AS voted FROM suggestions s JOIN users u ON u.id=s.user_id ORDER BY votes DESC,s.created_at DESC,s.id DESC LIMIT 100`, user?.id || -1);
     const topics = () => all(`SELECT t.id,t.title,t.body,t.created_at AS createdAt,u.username,u.id AS userId,(SELECT count(*) FROM replies r WHERE r.topic_id=t.id) AS replyCount FROM topics t JOIN users u ON u.id=t.user_id ORDER BY t.created_at DESC,t.id DESC LIMIT 100`);
@@ -93,7 +94,7 @@ export async function handleApi(request, env) {
       const cutoff=Date.now()-70000;
       const guests=(await first('SELECT count(*) AS n FROM online_presence WHERE last_seen>=? AND user_id IS NULL',cutoff)).n;
       const registered=(await first('SELECT count(*) AS n FROM online_presence p JOIN users u ON u.id=p.user_id WHERE p.last_seen>=? AND u.banned=0',cutoff)).n;
-      const players=await all('SELECT u.id,u.username,p.game FROM online_presence p JOIN users u ON u.id=p.user_id WHERE p.last_seen>=? AND u.banned=0 ORDER BY p.last_seen DESC,u.id LIMIT 100',cutoff);
+      const players=await all('SELECT u.id,u.public_id AS publicId,u.username,p.game FROM online_presence p JOIN users u ON u.id=p.user_id WHERE p.last_seen>=? AND u.banned=0 ORDER BY p.last_seen DESC,u.id LIMIT 100',cutoff);
       return {total:guests+registered,guests,registered,players,remaining:Math.max(0,registered-players.length)};
     }
     async function queueState(){
@@ -140,17 +141,17 @@ export async function handleApi(request, env) {
     const friendPair=otherId=>[Math.min(user.id,otherId),Math.max(user.id,otherId)];
     const friendship=async otherId=>first('SELECT status,requester_id AS requesterId,updated_at AS updatedAt FROM friend_links WHERE user_low=? AND user_high=?',...friendPair(otherId));
     async function friendSummary(){
-      const friends=await all(`SELECT u.id,u.username,EXISTS(SELECT 1 FROM online_presence p WHERE p.user_id=u.id AND p.last_seen>=?) AS online,(SELECT count(*) FROM friend_messages m WHERE m.sender_id=u.id AND m.recipient_id=? AND m.read_at IS NULL) AS unread FROM friend_links f JOIN users u ON u.id=CASE WHEN f.user_low=? THEN f.user_high ELSE f.user_low END WHERE (f.user_low=? OR f.user_high=?) AND f.status='accepted' AND u.banned=0 ORDER BY online DESC,u.username COLLATE NOCASE`,Date.now()-70000,user.id,user.id,user.id,user.id);
-      const requests=await all(`SELECT u.id,u.username,f.requester_id AS requesterId FROM friend_links f JOIN users u ON u.id=CASE WHEN f.user_low=? THEN f.user_high ELSE f.user_low END WHERE (f.user_low=? OR f.user_high=?) AND f.status='pending' AND u.banned=0 ORDER BY f.updated_at DESC LIMIT 100`,user.id,user.id,user.id);
-      return {self:{id:user.id,username:user.username},friends,incoming:requests.filter(item=>item.requesterId!==user.id),outgoing:requests.filter(item=>item.requesterId===user.id),unread:friends.reduce((sum,item)=>sum+item.unread,0)};
+      const friends=await all(`SELECT u.id,u.public_id AS publicId,u.username,EXISTS(SELECT 1 FROM online_presence p WHERE p.user_id=u.id AND p.last_seen>=?) AS online,(SELECT count(*) FROM friend_messages m WHERE m.sender_id=u.id AND m.recipient_id=? AND m.read_at IS NULL) AS unread FROM friend_links f JOIN users u ON u.id=CASE WHEN f.user_low=? THEN f.user_high ELSE f.user_low END WHERE (f.user_low=? OR f.user_high=?) AND f.status='accepted' AND u.banned=0 ORDER BY online DESC,u.username COLLATE NOCASE`,Date.now()-70000,user.id,user.id,user.id,user.id);
+      const requests=await all(`SELECT u.id,u.public_id AS publicId,u.username,f.requester_id AS requesterId FROM friend_links f JOIN users u ON u.id=CASE WHEN f.user_low=? THEN f.user_high ELSE f.user_low END WHERE (f.user_low=? OR f.user_high=?) AND f.status='pending' AND u.banned=0 ORDER BY f.updated_at DESC LIMIT 100`,user.id,user.id,user.id);
+      return {self:{id:user.id,publicId:user.publicId,username:user.username},friends,incoming:requests.filter(item=>item.requesterId!==user.id),outgoing:requests.filter(item=>item.requesterId===user.id),unread:friends.reduce((sum,item)=>sum+item.unread,0)};
     }
     if(path==='/api/friends'&&method==='GET'){requireUser();return json(await friendSummary());}
     if(path==='/api/friends/search'&&method==='GET'){
       requireUser();await rate(`friend-search:${user.id}`,120);
       const query=text(new URL(request.url).searchParams.get('q'),20);
       if(!query||query.length>20)fail(400,'请输入玩家昵称或 ID');
-      const matches=await all(`SELECT u.id,u.username,f.status,f.requester_id AS requesterId FROM users u LEFT JOIN friend_links f ON f.user_low=min(?,u.id) AND f.user_high=max(?,u.id) WHERE u.id<>? AND u.banned=0 AND (u.id=? OR instr(lower(u.username),lower(?))=1) ORDER BY CASE WHEN u.id=? OR lower(u.username)=lower(?) THEN 0 ELSE 1 END,u.username LIMIT 12`,user.id,user.id,user.id,/^\d+$/.test(query)?Number(query):-1,query,/^\d+$/.test(query)?Number(query):-1,query);
-      return json({self:{id:user.id},players:matches});
+      const matches=await all(`SELECT u.id,u.public_id AS publicId,u.username,f.status,f.requester_id AS requesterId FROM users u LEFT JOIN friend_links f ON f.user_low=min(?,u.id) AND f.user_high=max(?,u.id) WHERE u.id<>? AND u.banned=0 AND (u.public_id=? OR instr(lower(u.username),lower(?))=1) ORDER BY CASE WHEN u.public_id=? OR lower(u.username)=lower(?) THEN 0 ELSE 1 END,u.username LIMIT 12`,user.id,user.id,user.id,/^\d{5}$/.test(query)?Number(query):-1,query,/^\d{5}$/.test(query)?Number(query):-1,query);
+      return json({self:{id:user.id,publicId:user.publicId},players:matches});
     }
     if(path==='/api/friends/requests'&&method==='POST'){
       requireUser();await rate(`friend-request:${user.id}`,30);
@@ -278,8 +279,15 @@ export async function handleApi(request, env) {
       if (path === '/api/register') {
         if (!/^[\p{L}\p{N}_]{3,20}$/u.test(username)) fail(400,'昵称需为 3–20 个字母、数字、汉字或下划线');
         let account;
-        try { account = await first('INSERT INTO users(username,password_hash) VALUES(?,?) RETURNING id,username,role', username, await hashPassword(password)); }
-        catch (error) { if (String(error).includes('UNIQUE')) fail(409,'这个昵称已被使用'); throw error; }
+        const passwordHash=await hashPassword(password);
+        for(let attempt=0;attempt<20&&!account;attempt++){
+          try{account=await first('INSERT INTO users(public_id,username,password_hash) VALUES(?,?,?) RETURNING id,public_id AS publicId,username,role',randomPlayerId(),username,passwordHash);}
+          catch(error){
+            if(!String(error).includes('UNIQUE'))throw error;
+            if(await first('SELECT id FROM users WHERE username=?',username))fail(409,'这个昵称已被使用');
+          }
+        }
+        if(!account)fail(503,'暂时无法分配玩家 ID，请稍后重试');
         return session(account);
       }
       const account = await first('SELECT * FROM users WHERE username=?', username);
@@ -292,7 +300,7 @@ export async function handleApi(request, env) {
     if (method === 'POST' && path === '/api/logout') { if (token) await run('DELETE FROM sessions WHERE token_hash=?',await digest(token)); return json({ok:true}); }
     if (path === '/api/profile') {
       requireUser();
-      if (method==='GET') return json({profile:await first('SELECT id,username,role,created_at AS createdAt FROM users WHERE id=?',user.id)});
+      if (method==='GET') return json({profile:await first('SELECT id,public_id AS publicId,username,role,created_at AS createdAt FROM users WHERE id=?',user.id)});
     }
     if (method==='POST' && path==='/api/profile/avatar') {
       requireUser(); await rate(`avatar:${user.id}`,12);
@@ -471,7 +479,7 @@ export async function handleApi(request, env) {
       }
       if (method==='GET' && path==='/api/admin/suggestions') return json({items:await suggestions()});
       if (method==='GET' && path==='/api/admin/topics') return json({items:await topics()});
-      if (method==='GET' && path==='/api/admin/users') return json({items:await all('SELECT id,username,role,banned,created_at AS createdAt FROM users ORDER BY created_at DESC LIMIT 200')});
+      if (method==='GET' && path==='/api/admin/users') return json({items:await all('SELECT id,public_id AS publicId,username,role,banned,created_at AS createdAt FROM users ORDER BY created_at DESC LIMIT 200')});
       const ban=/^\/api\/admin\/users\/(\d+)\/ban$/.exec(path);
       if (ban && method==='POST') {
         const target=await first('SELECT role FROM users WHERE id=?',Number(ban[1]));

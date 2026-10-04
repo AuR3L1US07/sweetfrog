@@ -1,4 +1,5 @@
 import { iconSvg } from './icons.js';
+import { beijingTime } from './beijing-time.js';
 
 const page=document.createElement('main');page.id='friends-page';page.hidden=true;
 page.innerHTML='<nav class="club-breadcrumb" aria-label="当前位置"><a href="#games">← 游戏大厅</a><span>好友私信</span></nav><div id="friends-content"></div>';
@@ -33,8 +34,8 @@ function renderPeople(target,people,mode){
   if(!people.length){target.append(notice(mode==='friend'?'还没有好友。搜索昵称或 ID，发出第一份申请吧。':'暂时没有待处理的申请。'));return;}
   for(const person of people){
     const card=make('div','friend-row');card.append(avatar(person.id));
-    const copy=make('div','friend-row-copy');copy.append(make('strong','',person.username),make('small','',`ID ${person.id}${mode==='friend'?(person.online?' · 在线':' · 暂未在线'):''}`));card.append(copy);
-    if(mode==='friend'){const link=make('a','friend-action','发私信');link.href=`#friends/${person.id}`;card.append(link);if(person.unread)card.append(make('span','friend-unread',String(person.unread)));}
+    const copy=make('div','friend-row-copy');copy.append(make('strong','',person.username),make('small','',`ID ${person.publicId}${mode==='friend'?(person.online?' · 在线':' · 暂未在线'):''}`));card.append(copy);
+    if(mode==='friend'){const link=make('a','friend-action','发私信');link.href=`#friends/${person.publicId}`;card.append(link);if(person.unread)card.append(make('span','friend-unread',String(person.unread)));}
     else if(mode==='incoming'){card.append(action('接受',button=>mutate(button,`friends/requests/${person.id}`,{decision:'accept'},renderRoute)));card.append(action('拒绝',button=>mutate(button,`friends/requests/${person.id}`,{decision:'decline'},renderRoute),'friend-quiet'));}
     else card.append(action('撤回',button=>mutate(button,`friends/requests/${person.id}`,{decision:'cancel'},renderRoute),'friend-quiet'));
     target.append(card);
@@ -58,8 +59,8 @@ async function search(form){
     if(!data.players.length)results.append(notice('没有找到这个玩家，试试完整昵称或 ID。'));
     for(const person of data.players){
       const card=make('div','friend-row');card.append(avatar(person.id));
-      const copy=make('div','friend-row-copy');copy.append(make('strong','',person.username),make('small','',`ID ${person.id}`));card.append(copy);
-      if(person.status==='accepted'){const link=make('a','friend-action','发私信');link.href=`#friends/${person.id}`;card.append(link);}
+      const copy=make('div','friend-row-copy');copy.append(make('strong','',person.username),make('small','',`ID ${person.publicId}`));card.append(copy);
+      if(person.status==='accepted'){const link=make('a','friend-action','发私信');link.href=`#friends/${person.publicId}`;card.append(link);}
       else if(person.status==='pending')card.append(make('span','friend-pending',person.requesterId===data.self?.id?'已发送申请':'对方已申请你'));
       else card.append(action('加好友',button=>mutate(button,'friends/requests',{userId:person.id},()=>{status.textContent='申请已发出，等待对方同意。';button.textContent='已发送';button.disabled=true;})));
       results.append(card);
@@ -72,7 +73,7 @@ async function renderDashboard(id){
   content.append(action('刷新好友与邀请',()=>renderRoute(),'friend-quiet friends-refresh'));
   const searchPanel=make('section','friends-panel');searchPanel.append(make('h2','','寻找好友'));
   const form=make('form','friend-search');form.innerHTML='<label for="friend-query">玩家昵称或 ID</label><div><input id="friend-query" name="query" maxlength="20" autocomplete="off" placeholder="例如：大青蛙 或 123"><button type="submit">搜索玩家</button></div>';
-  form.addEventListener('submit',event=>{event.preventDefault();search(form);});searchPanel.append(form);
+  form.querySelector('input').placeholder='例如：大青蛙 或 58321';form.addEventListener('submit',event=>{event.preventDefault();search(form);});searchPanel.append(form);
   const results=make('div','friend-search-results');results.id='friend-search-results';searchPanel.append(results);content.append(searchPanel);
   const invitePanel=make('section','friends-panel');invitePanel.append(make('h2','','对战邀请'));const inviteList=make('div','friend-list');invitePanel.append(inviteList);content.append(invitePanel);
   const pendingPanel=make('section','friends-panel');pendingPanel.append(make('h2','','收到的申请'));const incoming=make('div','friend-list');pendingPanel.append(incoming);content.append(pendingPanel);
@@ -87,7 +88,7 @@ async function renderDashboard(id){
 }
 function messageNode(message,selfId){
   const own=message.senderId===selfId,bubble=make('div','friend-message'+(own?' is-own':''));bubble.dataset.messageId=String(message.id);
-  bubble.append(make('p','',message.body),make('time','',new Intl.DateTimeFormat('zh-CN',{hour:'2-digit',minute:'2-digit'}).format(new Date(message.createdAt))));return bubble;
+  bubble.append(make('p','',message.body),make('time','',beijingTime(message.createdAt,'clock')));return bubble;
 }
 function appendMessages(messages,selfId){
   const list=content.querySelector('#friend-messages');if(!list)return;const nearBottom=list.scrollHeight-list.scrollTop-list.clientHeight<100;
@@ -102,12 +103,13 @@ async function renderChat(peerId,id){
   content.replaceChildren(notice('正在打开对话…'));let friends;
   try{friends=await api('friends');}catch(error){if(id===currentRoute)content.replaceChildren(notice(error.message));return;}
   if(id!==currentRoute)return;
-  const peer=friends.friends.find(item=>item.id===peerId);
+  const peer=friends.friends.find(item=>item.publicId===peerId||item.id===peerId);
   if(!peer){content.replaceChildren(notice('这位玩家还不是你的好友。'));return;}
+  peerId=peer.id;
   content.replaceChildren();
   const back=make('a','forum-back','← 返回好友列表');back.href='#friends';content.append(back);
   const panel=make('section','friend-chat');const head=make('div','friend-chat-head');head.append(avatar(peer.id));
-  const label=make('div','');label.append(make('h1','',peer.username),make('span','',peer.online?'在线':'暂未在线'));head.append(label);panel.append(head);
+  const label=make('div','');label.append(make('h1','',peer.username),make('span','',`ID ${peer.publicId} · ${peer.online?'在线':'暂未在线'}`));head.append(label);panel.append(head);
   const messages=make('div','friend-messages');messages.id='friend-messages';messages.setAttribute('aria-label',`与${peer.username}的私信`);panel.append(messages);
   const form=make('form','friend-compose');form.innerHTML='<label for="friend-message-body">发送私信</label><div><textarea id="friend-message-body" name="body" maxlength="1000" rows="2" placeholder="写点什么…"></textarea><button type="submit">发送</button></div><p role="status"></p>';
   form.addEventListener('submit',async event=>{event.preventDefault();const body=form.elements.body.value.trim(),button=form.querySelector('button'),status=form.querySelector('[role=status]');if(!body)return;button.disabled=true;try{const data=await api(`friends/${peerId}/messages`,{method:'POST',body:{body}});appendMessages([data.message],friends.self.id);form.reset();status.textContent='';form.elements.body.focus();}catch(error){status.textContent=error.message;}finally{button.disabled=false;}});

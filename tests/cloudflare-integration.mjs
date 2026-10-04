@@ -29,6 +29,7 @@ try {
   assert.equal((await call('/api/register','POST',{username:'testfrog',password:'password123'},undefined,{Origin:'https://untrusted.example'}))[0],403);
   const [registered,player]=await call('/api/register','POST',{username:'testfrog',password:'password123'});
   assert.equal(registered,200,JSON.stringify(player));
+  assert.match(String(player.user.publicId),/^\d{5}$/);
   const token=player.token;
   const avatarUrl=`/api/avatars/${player.user.id}`;
   assert.match((await (await fetch(origin+avatarUrl)).text()),/卡通青蛙头像/);
@@ -64,6 +65,8 @@ try {
   assert.equal((await call('/api/admin/overview'))[0],401);
   assert.equal((await call('/api/admin/overview','GET',undefined,token))[0],403);
   const [,admin]=await call('/api/register','POST',{username:'testadmin',password:'adminPassword123'});
+  assert.match(String(admin.user.publicId),/^\d{5}$/);
+  assert.notEqual(admin.user.publicId,player.user.publicId);
   wrangler(['d1','execute','sweetfrog-db','--local','--persist-to',state,'--command',"UPDATE users SET role='admin' WHERE username='testadmin'"]);
   assert.equal((await call('/api/admin/overview','GET',undefined,admin.token))[1].users,2);
   const visitorId='0123456789abcdef0123456789abcdef',otherVisitor='abcdef0123456789abcdef0123456789';
@@ -147,6 +150,7 @@ try {
   }
   assert.equal((await call(`/api/friends/${admin.user.id}/messages`,'POST',{body:'先打个招呼'},token))[0],403);
   assert.equal((await call('/api/friends/search?q=testadm','GET',undefined,token))[1].players[0].id,admin.user.id);
+  assert.equal((await call(`/api/friends/search?q=${admin.user.publicId}`,'GET',undefined,token))[1].players[0].id,admin.user.id);
   assert.equal((await call('/api/friends/requests','POST',{userId:admin.user.id},token))[0],201);
   assert.equal((await call('/api/friends/requests','POST',{userId:admin.user.id},token))[0],409);
   assert.equal((await call('/api/friends','GET',undefined,admin.token))[1].incoming[0].id,player.user.id);

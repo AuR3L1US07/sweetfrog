@@ -1,0 +1,21 @@
+#lobby .hero{grid-template-columns:minmax(0,1fr) minmax(0,1fr);min-height:520px;gap:clamp(20px,4vw,60px);padding:38px 0 28px}
+#lobby .hero-copy{max-width:560px}
+#lobby .hero-art{min-width:0}
+#lobby .games-section{padding-top:14px}
+#lobby .section-heading{gap:24px;margin:0 0 24px}
+#lobby .game-grid{grid-template-columns:repeat(6,minmax(0,1fr));gap:18px}
+#lobby .game-card{grid-column:span 2;display:flex;flex-direction:column;min-width:0}
+#lobby .game-card .card-art{height:205px;flex:none}
+#lobby .game-card .card-body{display:flex;flex:1;flex-direction:column;min-width:0}
+#lobby .game-card .card-meta{margin-top:auto}
+#lobby .game-card:nth-child(n+4){grid-column:span 3;display:grid;grid-template-columns:minmax(0,43%) minmax(0,57%);min-height:230px}
+#lobby .game-card:nth-child(n+4) .card-art{height:100%;min-height:230px}
+#lobby .game-card:nth-child(n+4) .card-body{padding:25px 22px}
+#lobby .lobby-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin-top:20px}
+#lobby .lobby-actions>a{min-width:0;min-height:92px;margin:0;padding:16px 18px}
+#lobby .lobby-actions>a>span:nth-child(2){min-width:0}
+#lobby .lobby-actions strong{font-size:17px;line-height:1.3}
+#lobby .lobby-actions small{line-height:1.45}
+#lobby .lobby-actions .pk-lobby-arrow,#lobby .lobby-actions .match-lobby-arrow{font-size:11px}
+@media(max-width:1000px){#lobby .hero{min-height:0;gap:16px}#lobby .game-grid{grid-template-columns:repeat(2,minmax(0,1fr))}#lobby .game-card{grid-column:auto}#lobby .game-card:nth-child(n+4){grid-column:auto;display:flex;min-height:0}#lobby .game-card:nth-child(n+4) .card-art{height:205px;min-height:0}#lobby .game-card:nth-child(n+4) .card-body{padding:19px 17px 15px}#lobby .game-card:last-child{grid-column:span 2;display:grid;grid-template-columns:minmax(0,43%) minmax(0,57%)}#lobby .game-card:last-child .card-art{height:100%;min-height:220px}#lobby .lobby-actions{grid-template-columns:1fr}}
+@media(max-width:650px){#lobby .hero{grid-template-columns:1fr;gap:0;padding:27px 0 20px}#lobby .hero-copy{max-width:none}#lobby .hero-art{margin-top:11px}#lobby .section-heading{display:block;margin-bottom:18px}#lobby .game-grid{gap:12px}#lobby .game-card .card-art,#lobby .game-card:nth-child(n+4) .card-art{height:164px}#lobby .game-card:nth-child(n+4) .card-body{padding:14px 12px}#lobby .game-card:last-child{display:block}#lobby .game-card:last-child .card-art{height:183px;min-height:0}#lobby .lobby-actions{gap:11px;margin-top:14px}#lobby .lobby-actions>a{min-height:76px}#lobby .lobby-actions strong{font-size:16px}}

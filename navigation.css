@@ -3,3 +3,4 @@
 @media(max-width:390px){.site-header .brand{font-size:21px}.site-header .brand-mark{width:34px;height:34px;margin-right:5px}.site-header .account-chip{max-width:86px}.site-header .account-chip-name{display:none}.site-header .account-chip small{font-size:9px}.nav-menu-toggle span{display:none}}
 @media(prefers-reduced-motion:reduce){.site-header nav{transition:none}}
 .nav-menu-toggle{position:relative}.nav-menu-badge{position:absolute;top:-7px;right:-7px;display:grid;place-items:center;min-width:19px;height:19px;padding:0 4px;border-radius:20px;background:#e98274;color:white;font-size:10px;font-weight:900}.nav-menu-badge[hidden]{display:none}
+@media(max-width:1100px){.site-header:not(.nav-open) nav{display:none}.site-header.nav-open nav{transform:none;animation:nav-drawer-in .24s ease both}}@keyframes nav-drawer-in{from{transform:translateX(105%)}to{transform:translateX(0)}}

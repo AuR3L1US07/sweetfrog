@@ -11,7 +11,7 @@ const dbPath = process.env.SWEETFROG_DB || join(root, 'data', 'sweetfrog.sqlite'
 if (dbPath !== ':memory:') mkdirSync(dirname(dbPath), { recursive: true });
 const db = new DatabaseSync(dbPath);
 db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
-CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE COLLATE NOCASE, password_hash TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, public_id INTEGER UNIQUE CHECK(public_id BETWEEN 10000 AND 99999), username TEXT NOT NULL UNIQUE COLLATE NOCASE, password_hash TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS suggestions(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), title TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS suggestion_votes(suggestion_id INTEGER NOT NULL REFERENCES suggestions(id), user_id INTEGER NOT NULL REFERENCES users(id), PRIMARY KEY(suggestion_id,user_id));
@@ -22,13 +22,18 @@ CREATE INDEX IF NOT EXISTS idx_scores_game_score ON scores(game,score DESC);`);
 if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'role')) db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'player'");
 if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'banned')) db.exec('ALTER TABLE users ADD COLUMN banned INTEGER NOT NULL DEFAULT 0');
 if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'avatar_data')) db.exec('ALTER TABLE users ADD COLUMN avatar_data TEXT');
+if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'public_id')) db.exec('ALTER TABLE users ADD COLUMN public_id INTEGER CHECK(public_id BETWEEN 10000 AND 99999)');
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_public_id ON users(public_id)');
+function randomPlayerId(){return 10000+randomBytes(4).readUInt32BE(0)%90000;}
+function allocatePlayerId(){for(let attempt=0;attempt<100;attempt++){const id=randomPlayerId();if(!db.prepare('SELECT 1 FROM users WHERE public_id=?').get(id))return id;}throw Error('暂时无法分配玩家 ID');}
+for(const row of db.prepare('SELECT id FROM users WHERE public_id IS NULL').all())db.prepare('UPDATE users SET public_id=? WHERE id=?').run(allocatePlayerId(),row.id);
 const adminName = process.env.SWEETFROG_ADMIN_USER;
 const adminPassword = process.env.SWEETFROG_ADMIN_PASSWORD;
 if (adminName && adminPassword) {
   if (!/^[\p{L}\p{N}_]{3,20}$/u.test(adminName) || adminPassword.length < 12) throw Error('管理员昵称需为 3–20 字，密码至少 12 位');
   const existing = db.prepare('SELECT role FROM users WHERE username=?').get(adminName);
   if (existing && existing.role !== 'admin') throw Error('管理员昵称已被普通玩家占用，请更换昵称');
-  if (!existing) db.prepare("INSERT INTO users(username,password_hash,role) VALUES(?,?,'admin')").run(adminName, hashPassword(adminPassword));
+  if (!existing) db.prepare("INSERT INTO users(public_id,username,password_hash,role) VALUES(?,?,?,'admin')").run(allocatePlayerId(),adminName, hashPassword(adminPassword));
 }
 
 const allowedOrigins = new Set((process.env.SWEETFROG_ORIGINS || 'https://aur3l1us07.github.io,http://127.0.0.1:4175,http://localhost:4175').split(','));
@@ -42,8 +47,8 @@ function text(value,max) { return typeof value==='string'?value.trim().slice(0,m
 function hashPassword(password) { const salt=randomBytes(16).toString('hex');return `${salt}:${scryptSync(password,salt,64).toString('hex')}`; }
 function passwordMatches(password,stored) { const [salt,hex]=stored.split(':');return timingSafeEqual(scryptSync(password,salt,64),Buffer.from(hex,'hex')); }
 function tokenHash(token) { return createHash('sha256').update(token).digest('hex'); }
-function auth(req) { const token=/^Bearer ([a-f0-9]{64})$/.exec(req.headers.authorization||'')?.[1];if(!token)return null;return db.prepare('SELECT users.id,users.username,users.role FROM sessions JOIN users ON users.id=sessions.user_id WHERE token_hash=? AND expires_at>? AND users.banned=0').get(tokenHash(token),Date.now())||null; }
-function session(res,user) { const token=randomBytes(32).toString('hex');db.prepare('INSERT INTO sessions(token_hash,user_id,expires_at) VALUES(?,?,?)').run(tokenHash(token),user.id,Date.now()+30*86400000);json(res,200,{token,user:{id:user.id,username:user.username,role:user.role||'player'}}); }
+function auth(req) { const token=/^Bearer ([a-f0-9]{64})$/.exec(req.headers.authorization||'')?.[1];if(!token)return null;return db.prepare('SELECT users.id,users.public_id AS publicId,users.username,users.role FROM sessions JOIN users ON users.id=sessions.user_id WHERE token_hash=? AND expires_at>? AND users.banned=0').get(tokenHash(token),Date.now())||null; }
+function session(res,user) { const token=randomBytes(32).toString('hex');db.prepare('INSERT INTO sessions(token_hash,user_id,expires_at) VALUES(?,?,?)').run(tokenHash(token),user.id,Date.now()+30*86400000);json(res,200,{token,user:{id:user.id,publicId:user.publicId,username:user.username,role:user.role||'player'}}); }
 function suggestionList(userId) { return db.prepare(`SELECT s.id,s.title,s.body,s.created_at AS createdAt,u.username,u.id AS userId,(SELECT count(*) FROM suggestion_votes v WHERE v.suggestion_id=s.id) AS votes,EXISTS(SELECT 1 FROM suggestion_votes v WHERE v.suggestion_id=s.id AND v.user_id=?) AS voted FROM suggestions s JOIN users u ON u.id=s.user_id ORDER BY votes DESC,s.created_at DESC LIMIT 100`).all(userId||-1); }
 function topicList() { return db.prepare(`SELECT t.id,t.title,t.body,t.created_at AS createdAt,u.username,u.id AS userId,(SELECT count(*) FROM replies r WHERE r.topic_id=t.id) AS replyCount FROM topics t JOIN users u ON u.id=t.user_id ORDER BY t.created_at DESC LIMIT 100`).all(); }
 function rank(game,userId) { const entries=db.prepare(`SELECT u.username,u.id AS userId,s.score FROM scores s JOIN users u ON u.id=s.user_id WHERE s.game=? ORDER BY s.score DESC,s.updated_at ASC LIMIT 30`).all(game);let last=null,place=0;entries.forEach((entry,index)=>{if(entry.score!==last)place=index+1;last=entry.score;entry.rank=place;});const own=userId?db.prepare('SELECT score FROM scores WHERE game=? AND user_id=?').get(game,userId):null;const self=own?{score:own.score,rank:db.prepare('SELECT count(*) AS n FROM scores WHERE game=? AND score>?').get(game,own.score).n+1}:null;return{entries,self}; }
@@ -59,13 +64,13 @@ async function api(req,res,url) {
     const data=await body(req),username=text(data.username,20),password=data.password;
     if(!/^[\p{L}\p{N}_]{3,20}$/u.test(username))return fail(res,400,'昵称需为 3–20 个字母、数字、汉字或下划线');
     if(typeof password!=='string'||password.length<8||password.length>128)return fail(res,400,'密码需为 8–128 位');
-    try{const result=db.prepare('INSERT INTO users(username,password_hash) VALUES(?,?)').run(username,hashPassword(password));return session(res,{id:Number(result.lastInsertRowid),username});}
+    try{const publicId=allocatePlayerId(),result=db.prepare('INSERT INTO users(public_id,username,password_hash) VALUES(?,?,?)').run(publicId,username,hashPassword(password));return session(res,{id:Number(result.lastInsertRowid),publicId,username});}
     catch(error){if(String(error).includes('UNIQUE'))return fail(res,409,'这个昵称已被使用');throw error;}
   }
   if(method==='POST'&&url.pathname==='/api/login') {
     if(!rate(ip,'auth',8,3600000))return fail(res,429,'尝试次数过多，请稍后再试');
     const data=await body(req),username=text(data.username,20),password=data.password;
-    const account=db.prepare('SELECT * FROM users WHERE username=?').get(username);
+    const account=db.prepare('SELECT *,public_id AS publicId FROM users WHERE username=?').get(username);
     if(!account||typeof password!=='string'||!passwordMatches(password,account.password_hash))return fail(res,401,'昵称或密码不正确');
     if(account.banned)return fail(res,403,'账号已停用');
     return session(res,account);
@@ -73,7 +78,7 @@ async function api(req,res,url) {
   if(method==='POST'&&url.pathname==='/api/logout') { const token=/^Bearer ([a-f0-9]{64})$/.exec(req.headers.authorization||'')?.[1];if(token)db.prepare('DELETE FROM sessions WHERE token_hash=?').run(tokenHash(token));return json(res,200,{ok:true}); }
   if(url.pathname==='/api/profile') {
     if(!user)return fail(res,401,'请先登录');
-    if(method==='GET'){const profile=db.prepare('SELECT id,username,role,created_at AS createdAt FROM users WHERE id=?').get(user.id);return json(res,200,{profile});}
+    if(method==='GET'){const profile=db.prepare('SELECT id,public_id AS publicId,username,role,created_at AS createdAt FROM users WHERE id=?').get(user.id);return json(res,200,{profile});}
   }
   if(method==='POST'&&url.pathname==='/api/profile/avatar') {
     if(!user)return fail(res,401,'请先登录');
@@ -130,7 +135,7 @@ async function api(req,res,url) {
     }
     if(method==='GET'&&url.pathname==='/api/admin/suggestions')return json(res,200,{items:suggestionList(user.id)});
     if(method==='GET'&&url.pathname==='/api/admin/topics')return json(res,200,{items:topicList()});
-    if(method==='GET'&&url.pathname==='/api/admin/users')return json(res,200,{items:db.prepare('SELECT id,username,role,banned,created_at AS createdAt FROM users ORDER BY created_at DESC LIMIT 200').all()});
+    if(method==='GET'&&url.pathname==='/api/admin/users')return json(res,200,{items:db.prepare('SELECT id,public_id AS publicId,username,role,banned,created_at AS createdAt FROM users ORDER BY created_at DESC LIMIT 200').all()});
     const userBan=/^\/api\/admin\/users\/(\d+)\/ban$/.exec(url.pathname);
     if(method==='POST'&&userBan){const target=db.prepare('SELECT role FROM users WHERE id=?').get(Number(userBan[1]));if(!target)return fail(res,404,'玩家不存在');if(target.role==='admin')return fail(res,403,'不能停用管理员');const data=await body(req);if(typeof data.banned!=='boolean')return fail(res,400,'状态无效');db.prepare('UPDATE users SET banned=? WHERE id=?').run(Number(data.banned),Number(userBan[1]));return json(res,200,{ok:true});}
     const suggestion=/^\/api\/admin\/suggestions\/(\d+)$/.exec(url.pathname);
