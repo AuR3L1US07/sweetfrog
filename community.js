@@ -32,9 +32,6 @@ function postMeta(item){const meta=el('div','forum-meta');meta.append(memberMark
 function sectionTop(content,type){
   const isIdea=type==='suggestions';
   content.append(heading(isIdea?'IDEA BOARD':'FROG FORUM',isIdea?'意见留言':'玩家社区',isIdea?'喜欢的建议，点个赞让它排到前面。':'聊游戏、晒成绩，或者发起一场新讨论。'));
-  const tabs=el('nav','forum-switch');tabs.setAttribute('aria-label','社区栏目');
-  for(const [route,label] of [['discussion','玩家社区'],['suggestions','意见留言']]){const link=el('a','forum-switch-link',label);link.href='#'+route;if(type===route){link.classList.add('active');link.setAttribute('aria-current','page');}tabs.append(link);}
-  content.append(tabs);
 }
 function compose(content,type){
   const isIdea=type==='suggestions';
