@@ -4,3 +4,9 @@ data/
 dist/
 .wrangler/
 .DS_Store
+/.env
+/.env.*
+/.dev.vars*
+*.pem
+*.key
+*service-account*.json
