@@ -69,6 +69,16 @@ test('registration, guest permissions, unique votes, replies and rankings', asyn
     assert.equal((await call('/api/topics', 'POST', { title:'Blocked', body:'Blocked' }, token))[0], 401);
     assert.equal((await call('/api/login', 'POST', { username:'testfrog', password:'password123' }))[0], 403);
     assert.equal((await call(`/api/admin/users/${scoreUserId}/ban`, 'POST', { banned:false }, adminToken))[0], 200);
+    assert.equal((await call('/api/profile'))[0],401);
+    assert.equal((await call('/api/profile','GET',undefined,adminToken))[1].profile.username,'testadmin');
+    assert.equal((await call('/api/profile/username','POST',{username:'newadmin',currentPassword:'wrong'},adminToken))[0],403);
+    assert.equal((await call('/api/profile/username','POST',{username:'testfrog',currentPassword:'localTestPassword456!'},adminToken))[0],409);
+    assert.equal((await call('/api/profile/username','POST',{username:'newadmin',currentPassword:'localTestPassword456!'},adminToken))[1].user.username,'newadmin');
+    assert.equal((await call('/api/session','GET',undefined,adminToken))[1].user.username,'newadmin');
+    assert.equal((await call('/api/profile/password','POST',{currentPassword:'wrong',newPassword:'changedPassword456!'},adminToken))[0],403);
+    assert.equal((await call('/api/profile/password','POST',{currentPassword:'localTestPassword456!',newPassword:'localTestPassword456!'},adminToken))[0],400);
+    assert.equal((await call('/api/profile/password','POST',{currentPassword:'localTestPassword456!',newPassword:'changedPassword456!'},adminToken))[0],200);
+    assert.equal((await call('/api/session','GET',undefined,adminToken))[1].user,null);
     assert.equal((await call('/api/logout', 'POST', {}, token))[0], 200);
     assert.equal((await call('/api/leaderboards/tap', 'POST', { score:30 }, token))[0], 401);
   } finally { child.kill(); }

@@ -1,7 +1,7 @@
 import { communityRequest } from './community-transport.js';
 
 const games = { tap:'逮住大青蛙', merge:'合成大青蛙', flap:'青蛙起飞', puzzle:'青蛙2048', aim:'青蛙定位练习' };
-const routes = new Set(['suggestions','discussion','leaderboard','account']);
+const routes = new Set(['suggestions','discussion','leaderboard','account','profile']);
 const $ = selector => document.querySelector(selector);
 const el = (tag,className,text) => { const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node; };
 const makeButton = (label,onClick,className='') => { const node=el('button',className,label);node.type='button';node.addEventListener('click',onClick);return node; };
@@ -9,17 +9,17 @@ const page = el('main','club-page'); page.id='club-page';page.hidden=true;
 page.innerHTML=`<nav class="club-breadcrumb" aria-label="当前位置"><a href="#games">← 游戏大厅</a><span id="club-location"></span></nav><div id="club-content"></div>`;
 $('#game-screen').before(page);
 const nav=$('.site-header nav');
-for(const [route,label] of [['suggestions','意见留言'],['discussion','玩家社区'],['leaderboard','排行榜'],['account','登录 / 注册']]){const link=el('a','club-nav-link',label);link.href='#'+route;link.dataset.clubNav=route;nav.insertBefore(link,$('#sound-toggle'));}
+for(const [route,label] of [['suggestions','意见留言'],['discussion','玩家社区'],['leaderboard','排行榜']]){const link=el('a','club-nav-link',label);link.href='#'+route;link.dataset.clubNav=route;nav.insertBefore(link,$('#sound-toggle'));}
 const rankLink=el('a','game-rank-link','查看本游戏排行榜 ↗');rankLink.href='#leaderboard';$('#game-screen .play-footer').before(rankLink);
 let token='';try{token=localStorage.getItem('sweetfrog-session')||'';}catch{}
-let user=null,rankGame='tap',accountMode='login',returnTo='games';
+let user=null,rankGame='tap',accountMode='login',returnTo='games',accountMessage='';
 const friendlyError=error=>error.message||'暂时连接不上服务器，请稍后重试。';
 async function request(path,options={}){
   return communityRequest(path,options,token);
 }
 async function refreshSession(){if(!token){user=null;return;}try{user=(await request('/api/session')).user;if(!user)clearSession();}catch{user=null;}}
 function clearSession(){token='';user=null;try{localStorage.removeItem('sweetfrog-session');}catch{}}
-function syncAdminLink(){let link=$('#admin-nav-link');if(user?.role==='admin'&&!link){link=el('a','club-nav-link','管理后台');link.id='admin-nav-link';link.href='./admin.html';$('#sound-toggle').before(link);}else if(user?.role!=='admin')link?.remove();}
+function syncAdminLink(){let link=$('#admin-nav-link');if(user?.role==='admin'&&!link){link=el('a','club-nav-link','管理后台');link.id='admin-nav-link';link.href='./admin.html';$('#sound-toggle').before(link);}else if(user?.role!=='admin')link?.remove();const chip=$('#account-chip');chip.href=user?'#profile':'#account';chip.replaceChildren(...(user?[el('span','account-chip-name',user.username),el('small','',`ID ${user.id}`)]:[document.createTextNode('登录 / 注册')]));chip.classList.toggle('signed-in',Boolean(user));chip.setAttribute('aria-label',user?`个人信息：${user.username}，玩家 ID ${user.id}`:'登录或注册');}
 function saveSession(data){token=data.token;user=data.user;try{localStorage.setItem('sweetfrog-session',token);}catch{}syncAdminLink();}
 function heading(eyebrow,title,description){const wrap=el('div','club-heading');wrap.innerHTML=`<span class="eyebrow"></span><h1></h1><p></p>`;wrap.querySelector('.eyebrow').textContent=eyebrow;wrap.querySelector('h1').textContent=title;wrap.querySelector('p').textContent=description;return wrap;}
 function notice(message){return el('p','club-notice',message);}
@@ -96,16 +96,34 @@ async function leaderboard(content){
     content.append(el('div','club-my-rank',user?(data.self?`你的排名：第 ${data.self.rank} 名 · ${data.self.score} 分`:'你还未在这款游戏上榜，完成一局后自动提交。'):'游客可以看榜；注册登录后才能上榜。'));
   }catch(error){list.replaceChildren(notice(friendlyError(error)));}
 }
+async function profile(content){
+  content.append(heading('MY FROG ID','个人信息','查看账号资料，修改昵称或密码。'));
+  if(!user){content.append(gate('请先登录后查看个人信息。'));return;}
+  const overview=el('section','profile-overview account-card');
+  overview.append(el('span','profile-eyebrow','PLAYER CARD'),el('h2','',user.username));
+  const facts=el('dl','profile-facts');facts.append(el('dt','','玩家 ID'),el('dd','',String(user.id)),el('dt','','账号身份'),el('dd','',user.role==='admin'?'管理员':'玩家'));
+  overview.append(facts);content.append(overview);
+  try{const {profile}=await request('/api/profile');const created=el('p','profile-created','注册时间：'+time(profile.createdAt));overview.append(created);}
+  catch(error){overview.append(notice(friendlyError(error)));}
+  const grid=el('div','profile-grid');content.append(grid);
+  const nameForm=el('form','profile-panel');nameForm.innerHTML=`<h2>修改用户名</h2><label>新用户名<input name="username" autocomplete="username" minlength="3" maxlength="20" required></label><label>当前密码<input name="currentPassword" type="password" autocomplete="current-password" required></label><button type="submit">保存用户名</button><p role="status"></p>`;
+  nameForm.elements.username.value=user.username;
+  nameForm.addEventListener('submit',async event=>{event.preventDefault();const button=nameForm.querySelector('button'),status=nameForm.querySelector('[role=status]');button.disabled=true;status.textContent='正在保存…';try{const result=await request('/api/profile/username',{method:'POST',body:JSON.stringify({username:nameForm.elements.username.value.trim(),currentPassword:nameForm.elements.currentPassword.value})});user=result.user;nameForm.elements.currentPassword.value='';overview.querySelector('h2').textContent=user.username;syncAdminLink();status.textContent='用户名已更新。';}catch(error){status.textContent=friendlyError(error);}finally{button.disabled=false;}});grid.append(nameForm);
+  const passForm=el('form','profile-panel');passForm.innerHTML=`<h2>修改密码</h2><label>当前密码<input name="currentPassword" type="password" autocomplete="current-password" required></label><label>新密码<input name="newPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required></label><label>确认新密码<input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required></label><button type="submit">更新密码</button><p role="status"></p>`;
+  passForm.addEventListener('submit',async event=>{event.preventDefault();const button=passForm.querySelector('button'),status=passForm.querySelector('[role=status]');if(passForm.elements.newPassword.value!==passForm.elements.confirmPassword.value){status.textContent='两次输入的新密码不一致。';return;}button.disabled=true;status.textContent='正在更新…';try{await request('/api/profile/password',{method:'POST',body:JSON.stringify({currentPassword:passForm.elements.currentPassword.value,newPassword:passForm.elements.newPassword.value})});clearSession();syncAdminLink();accountMode='login';accountMessage='密码已更新，请用新密码重新登录。';location.hash='account';}catch(error){status.textContent=friendlyError(error);button.disabled=false;}});grid.append(passForm);
+  content.append(makeButton('退出登录',async()=>{try{await request('/api/logout',{method:'POST'});}catch{}clearSession();syncAdminLink();location.hash='account';},'profile-logout'));
+}
 function account(content){
   content.append(heading('JOIN THE CLUB','玩家身份','注册后可以提议、点赞、讨论和上榜；也可以先以游客身份逛逛。'));
   if(user){const card=el('div','account-card');card.append(el('h2','',`欢迎回来，${user.username}`),el('p','','你已登录，完成游戏后会自动记录最高分。'));if(user.role==='admin'){const link=el('a','club-action','进入管理后台 ↗');link.href='./admin.html';card.append(link);}card.append(makeButton('退出登录',async()=>{try{await request('/api/logout',{method:'POST'});}catch{}clearSession();syncAdminLink();renderCurrent();},'club-action'));content.append(card);return;}
+  if(accountMessage){content.append(el('p','club-success',accountMessage));accountMessage='';}
   const tabs=el('div','club-tabs');for(const [mode,label] of [['login','登录'],['register','注册']]){const tab=makeButton(label,()=>{accountMode=mode;renderCurrent();},'club-tab');tab.classList.toggle('selected',accountMode===mode);tabs.append(tab);}content.append(tabs);
   const formNode=el('form','account-card account-form');formNode.innerHTML=`<label>玩家昵称<input name="username" autocomplete="username" minlength="3" maxlength="20" required></label><label>密码<input name="password" type="password" autocomplete="current-password" minlength="8" maxlength="128" required></label><button type="submit"></button><p role="status"></p>`;
   formNode.querySelector('button').textContent=accountMode==='register'?'创建账号 ↗':'登录 ↗';formNode.querySelector('[name=password]').autocomplete=accountMode==='register'?'new-password':'current-password';
   formNode.addEventListener('submit',async event=>{event.preventDefault();const button=formNode.querySelector('button'),status=formNode.querySelector('[role=status]');button.disabled=true;status.textContent='正在处理…';try{const data=await request('/api/'+accountMode,{method:'POST',body:JSON.stringify({username:formNode.elements.username.value.trim(),password:formNode.elements.password.value})});saveSession(data);location.hash=returnTo;returnTo='games';}catch(error){status.textContent=friendlyError(error);}finally{button.disabled=false;}});
   content.append(formNode);const guest=el('a','guest-link','游客登录 · 先逛逛 →');guest.href='#games';content.append(guest);
 }
-async function renderCurrent(){const route=location.hash.slice(1),detail=/^(suggestions|discussion)\/(\d+)$/.exec(route),base=detail?.[1]||route,visible=routes.has(base);page.hidden=!visible;if(!visible)return;$('#lobby').hidden=true;$('#game-screen').hidden=true;const content=el('div');content.id='club-content';$('#club-content').replaceWith(content);$('#club-location').textContent={suggestions:'意见留言',discussion:'玩家社区',leaderboard:'排行榜',account:'登录 / 注册'}[base];document.querySelectorAll('[data-club-nav]').forEach(link=>link.classList.toggle('active',link.dataset.clubNav===base));if(detail){if(base==='suggestions')await suggestionDetail(content,detail[2]);else await topicDetail(content,detail[2]);}else if(base==='suggestions')await suggestions(content);else if(base==='discussion')await discussion(content);else if(base==='leaderboard')await leaderboard(content);else account(content);}
+async function renderCurrent(){const route=location.hash.slice(1),detail=/^(suggestions|discussion)\/(\d+)$/.exec(route),base=detail?.[1]||route,visible=routes.has(base);page.hidden=!visible;if(!visible)return;if(base==='account'&&user){location.hash='profile';return;}$('#lobby').hidden=true;$('#game-screen').hidden=true;const content=el('div');content.id='club-content';$('#club-content').replaceWith(content);$('#club-location').textContent={suggestions:'意见留言',discussion:'玩家社区',leaderboard:'排行榜',account:'登录 / 注册',profile:'个人信息'}[base];document.querySelectorAll('[data-club-nav]').forEach(link=>link.classList.toggle('active',link.dataset.clubNav===base));if(detail){if(base==='suggestions')await suggestionDetail(content,detail[2]);else await topicDetail(content,detail[2]);}else if(base==='suggestions')await suggestions(content);else if(base==='discussion')await discussion(content);else if(base==='leaderboard')await leaderboard(content);else if(base==='profile')await profile(content);else account(content);}
 window.addEventListener('hashchange',renderCurrent);
 window.addEventListener('sweetfrog:finished',async event=>{if(!user)return;const {game,score}=event.detail;if(!games[game])return;try{await request(`/api/leaderboards/${game}`,{method:'POST',body:JSON.stringify({score})});}catch(error){console.warn('成绩提交失败:',friendlyError(error));}});
 await refreshSession();syncAdminLink();renderCurrent();

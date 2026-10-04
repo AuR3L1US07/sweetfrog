@@ -67,6 +67,32 @@ async function api(req,res,url) {
     return session(res,account);
   }
   if(method==='POST'&&url.pathname==='/api/logout') { const token=/^Bearer ([a-f0-9]{64})$/.exec(req.headers.authorization||'')?.[1];if(token)db.prepare('DELETE FROM sessions WHERE token_hash=?').run(tokenHash(token));return json(res,200,{ok:true}); }
+  if(url.pathname==='/api/profile') {
+    if(!user)return fail(res,401,'请先登录');
+    if(method==='GET'){const profile=db.prepare('SELECT id,username,role,created_at AS createdAt FROM users WHERE id=?').get(user.id);return json(res,200,{profile});}
+  }
+  if(method==='POST'&&url.pathname.startsWith('/api/profile/')) {
+    if(!user)return fail(res,401,'请先登录');
+    if(!rate(`user${user.id}`,'profile',8,3600000))return fail(res,429,'操作太频繁，请稍后再试');
+    const data=await body(req),currentPassword=data.currentPassword;
+    const account=db.prepare('SELECT password_hash FROM users WHERE id=?').get(user.id);
+    if(typeof currentPassword!=='string'||!passwordMatches(currentPassword,account.password_hash))return fail(res,403,'当前密码不正确');
+    if(url.pathname==='/api/profile/username') {
+      const username=text(data.username,20);
+      if(!/^[\p{L}\p{N}_]{3,20}$/u.test(username))return fail(res,400,'昵称需为 3–20 个字母、数字、汉字或下划线');
+      try{db.prepare('UPDATE users SET username=? WHERE id=?').run(username,user.id);}
+      catch(error){if(String(error).includes('UNIQUE'))return fail(res,409,'这个昵称已被使用');throw error;}
+      return json(res,200,{ok:true,user:{...user,username}});
+    }
+    if(url.pathname==='/api/profile/password') {
+      const password=data.newPassword;
+      if(typeof password!=='string'||password.length<8||password.length>128)return fail(res,400,'新密码需为 8–128 位');
+      if(passwordMatches(password,account.password_hash))return fail(res,400,'新密码不能与当前密码相同');
+      db.exec('BEGIN');try{db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(hashPassword(password),user.id);db.prepare('DELETE FROM sessions WHERE user_id=?').run(user.id);db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}
+      return json(res,200,{ok:true});
+    }
+  }
+
   if(method==='GET'&&url.pathname==='/api/suggestions')return json(res,200,{items:suggestionList(user?.id)});
   const suggestionDetail=/^\/api\/suggestions\/(\d+)$/.exec(url.pathname);
   if(method==='GET'&&suggestionDetail){const item=db.prepare(`SELECT s.id,s.title,s.body,s.created_at AS createdAt,u.username,(SELECT count(*) FROM suggestion_votes v WHERE v.suggestion_id=s.id) AS votes,EXISTS(SELECT 1 FROM suggestion_votes v WHERE v.suggestion_id=s.id AND v.user_id=?) AS voted FROM suggestions s JOIN users u ON u.id=s.user_id WHERE s.id=?`).get(user?.id||-1,Number(suggestionDetail[1]));return item?json(res,200,{item}):fail(res,404,'建议不存在');}

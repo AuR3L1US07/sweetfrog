@@ -97,6 +97,33 @@ export async function handleApi(request, env) {
       return session(account);
     }
     if (method === 'POST' && path === '/api/logout') { if (token) await run('DELETE FROM sessions WHERE token_hash=?',await digest(token)); return json({ok:true}); }
+    if (path === '/api/profile') {
+      requireUser();
+      if (method==='GET') return json({profile:await first('SELECT id,username,role,created_at AS createdAt FROM users WHERE id=?',user.id)});
+    }
+    if (method==='POST' && path.startsWith('/api/profile/')) {
+      requireUser(); await rate(`profile:${user.id}`,8);
+      const data=await body(request),account=await first('SELECT password_hash FROM users WHERE id=?',user.id);
+      if(typeof data.currentPassword!=='string'||!await matches(data.currentPassword,account.password_hash))fail(403,'当前密码不正确');
+      if(path==='/api/profile/username') {
+        const username=text(data.username,20);
+        if(!/^[\p{L}\p{N}_]{3,20}$/u.test(username))fail(400,'昵称需为 3–20 个字母、数字、汉字或下划线');
+        try{await run('UPDATE users SET username=? WHERE id=?',username,user.id);}
+        catch(error){if(String(error).includes('UNIQUE'))fail(409,'这个昵称已被使用');throw error;}
+        return json({ok:true,user:{...user,username}});
+      }
+      if(path==='/api/profile/password') {
+        const password=data.newPassword;
+        if(typeof password!=='string'||password.length<8||password.length>128)fail(400,'新密码需为 8–128 位');
+        if(await matches(password,account.password_hash))fail(400,'新密码不能与当前密码相同');
+        await db.batch([
+          statement('UPDATE users SET password_hash=? WHERE id=?',[await hashPassword(password),user.id]),
+          statement('DELETE FROM sessions WHERE user_id=?',[user.id])
+        ]);
+        return json({ok:true});
+      }
+    }
+
     const detail=/^\/api\/(suggestions|topics)\/(\d+)$/.exec(path);
     if (detail && method==='GET') {
       const [,,rawId]=detail, id=Number(rawId), suggestion=detail[1]==='suggestions';

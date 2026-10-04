@@ -73,6 +73,16 @@ try {
   assert.equal((await call('/api/session','GET',undefined,newSession.token))[1].user,null);
   await call('/api/login','POST',{username:'testfrog',password:'wrong-password'});
   assert.equal((await call('/api/login','POST',{username:'testfrog',password:'wrong-password'}))[0],429);
+  assert.equal((await call('/api/profile'))[0],401);
+  assert.equal((await call('/api/profile','GET',undefined,admin.token))[1].profile.username,'testadmin');
+  assert.equal((await call('/api/profile/username','POST',{username:'newadmin',currentPassword:'wrong'},admin.token))[0],403);
+  assert.equal((await call('/api/profile/username','POST',{username:'testfrog',currentPassword:'adminPassword123'},admin.token))[0],409);
+  assert.equal((await call('/api/profile/username','POST',{username:'newadmin',currentPassword:'adminPassword123'},admin.token))[1].user.username,'newadmin');
+  assert.equal((await call('/api/session','GET',undefined,admin.token))[1].user.username,'newadmin');
+  assert.equal((await call('/api/profile/password','POST',{currentPassword:'wrong',newPassword:'changedPassword456!'},admin.token))[0],403);
+  assert.equal((await call('/api/profile/password','POST',{currentPassword:'adminPassword123',newPassword:'adminPassword123'},admin.token))[0],400);
+  assert.equal((await call('/api/profile/password','POST',{currentPassword:'adminPassword123',newPassword:'changedPassword456!'},admin.token))[0],200);
+  assert.equal((await call('/api/session','GET',undefined,admin.token))[1].user,null);
   console.log('Cloudflare workerd/D1 integration passed: guest, auth, unique votes, replies, five rankings, admin, bans, logout, rate limits.');
 } finally {
   if(child) { const exited=new Promise(r=>child.once('exit',r)); child.kill(); await exited; }
