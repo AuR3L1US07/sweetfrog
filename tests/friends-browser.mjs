@@ -27,6 +27,7 @@ try{
   await guestPage.locator('#friend-query').fill(host.user.username);
   await guestPage.getByRole('button',{name:'搜索玩家'}).click();
   await guestPage.getByText(host.user.username).waitFor();
+  await guestPage.getByText(`ID ${host.user.publicId}`).waitFor();
   await guestPage.getByRole('button',{name:'加好友'}).click();
   await guestPage.getByText('申请已发出').waitFor();
   await hostPage.reload();await hostPage.getByRole('button',{name:'接受',exact:true}).waitFor();
@@ -34,6 +35,7 @@ try{
   await hostPage.getByRole('link',{name:'发私信'}).waitFor();
   await guestPage.reload();await guestPage.getByRole('link',{name:'发私信'}).waitFor();
   await guestPage.getByRole('link',{name:'发私信'}).click();
+  assert.equal(new URL(guestPage.url()).hash,`#friends/${host.user.publicId}`);
   await guestPage.locator('#friend-message-body').fill('今晚一起玩青蛙定位练习？');
   await guestPage.getByRole('button',{name:'发送',exact:true}).click();
   await guestPage.getByText('今晚一起玩青蛙定位练习？').waitFor();
