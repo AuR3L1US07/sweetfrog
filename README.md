@@ -8,7 +8,7 @@
 
 本地开发需要 Node.js 24：运行 `node server/server.mjs`，访问 `http://127.0.0.1:4175/`。数据默认在 `data/sweetfrog.sqlite`，已被 Git 忽略；可用 `SWEETFROG_DB` 和 `PORT` 环境变量调整。不要把数据库或账号信息提交到 GitHub。
 
-GitHub Pages 只能托管静态前端。正式启用账号和跨设备社区前，需要将 `server/server.mjs` 部署到支持持久磁盘与 Node.js 24 的 HTTPS 服务，并把其 URL 填到 `community-config.js` 的 `apiBaseUrl`。服务端的 `SWEETFROG_ORIGINS` 应包含网页域名。当前未配置线上 API 时，线上游戏仍可玩，但账号和社区页面会显示连接失败，不能保存在线数据。浏览器端提交的游戏成绩无法完全防伪，排行榜适合朋友间娱乐，不适合有奖竞赛。
+GitHub Pages 只能托管静态前端。正式启用账号和跨设备社区前，建议把整个网站与 `server/server.mjs` 一起部署到支持持久磁盘、Node.js 24 和 HTTPS 的服务，保持 `community-config.js` 的 `apiBaseUrl` 为空以使用同源 API。当前 GitHub Pages 的 `main` 分支仍是旧版纯游戏站，新的账号页面暂不发布。浏览器端提交的游戏成绩无法完全防伪，排行榜适合朋友间娱乐，不适合有奖竞赛。
 
 管理后台位于 `admin.html`。首次启动服务时设置 `SWEETFROG_ADMIN_USER` 和 `SWEETFROG_ADMIN_PASSWORD`（至少 12 位），服务会创建管理员账号；之后使用该账号在网站登录。管理员可以查看总览、提议、话题与回复、排行榜及账号列表，删除不当内容和异常成绩，并停用或恢复普通玩家账号。不要把管理员密码提交到仓库，也不要把 SQLite 数据库提交或上传到 GitHub Pages。后台 API 会独立校验管理员身份，普通玩家无法通过直接请求调用。
 
