@@ -1,11 +1,11 @@
 import { insideTarget, hitPoints, summarizeAim, nextPosition, targetRadius, decoyPosition } from './aim-core.js?v=20261003-frogs';
 
-export function createAimGame({ stage, tileCanvas, canPlay, setScore, extra, beep, finish }) {
+export function createAimGame({ stage, tileCanvas, canPlay, setScore, extra, beep, finish, random=Math.random, skipCountdown=false }) {
   const mode = document.querySelector('#aim-mode').value;
   const difficulty = document.querySelector('#aim-difficulty').value;
   const duration = Number(document.querySelector('#aim-duration').value);
   const settings = { random: { speed: 125 }, easy: { r: 34, speed: 85 }, normal: { r: 25, speed: 125 }, hard: { r: 17, speed: 175 } }[difficulty];
-  let remaining = duration, countdown = 3, elapsed = 0, hits = 0, shots = 0;
+  let remaining = duration, countdown = skipCountdown?0:3, elapsed = 0, hits = 0, shots = 0;
   let points = 0, combo = 0, bestCombo = 0, totalReaction = 0, spawned = 0, target = null, photo = 0, effects = [], decoys = [], frogHits = 0, decoyAge = 0;
   const field = document.createElement('div'); field.className = 'aim-field';
   const targetButton = document.createElement('button'); targetButton.type = 'button'; targetButton.className = 'aim-target'; targetButton.tabIndex = -1; targetButton.setAttribute('aria-label', '照片圆靶'); targetButton.hidden = true;
@@ -18,8 +18,8 @@ export function createAimGame({ stage, tileCanvas, canPlay, setScore, extra, bee
   function position() { if (!target) return; targetButton.style.transform = `translate(${target.x - target.r}px, ${target.y - target.r}px)`; }
   function spawn() {
     const { width, height } = field.getBoundingClientRect();
-    const radius = targetRadius(difficulty); const next = nextPosition(width, height, radius, target);
-    const angle = Math.random() * Math.PI * 2;
+    const radius = targetRadius(difficulty,random); const next = nextPosition(width, height, radius, target,random);
+    const angle = random() * Math.PI * 2;
     target = { ...next, r: radius, vx: Math.cos(angle) * settings.speed, vy: Math.sin(angle) * settings.speed };
     spawned = elapsed;
     targetButton.style.width = targetButton.style.height = target.r * 2 + 'px';
@@ -31,7 +31,7 @@ export function createAimGame({ stage, tileCanvas, canPlay, setScore, extra, bee
     if (!target) return;
     for (let i = 0; i < 2; i++) {
       const r = 27;
-      const p = decoyPosition(field.clientWidth, field.clientHeight, r, [target, ...decoys]);
+      const p = decoyPosition(field.clientWidth, field.clientHeight, r, [target, ...decoys],random);
       if (!p) continue;
       const element = document.createElement('button'); element.type = 'button'; element.className = 'aim-decoy'; element.tabIndex = -1;
       element.setAttribute('aria-label', '青蛙炸弹：不要点击');
@@ -62,7 +62,7 @@ export function createAimGame({ stage, tileCanvas, canPlay, setScore, extra, bee
     if (!target) return; const pad = target.r + 16;
     target.x = Math.max(pad, Math.min(field.clientWidth - pad, target.x)); target.y = Math.max(pad, Math.min(field.clientHeight - pad, target.y)); position(); refreshDecoys();
   }); resize.observe(field);
-  metrics(); extra(duration + ' 秒');
+  metrics(); extra(duration + ' 秒');if(skipCountdown){marker.hidden=true;spawn();}
   return {
     update(dt) {
       for (const item of effects) { item.life -= dt; if (item.life <= 0) item.element.remove(); }

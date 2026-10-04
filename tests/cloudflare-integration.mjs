@@ -88,6 +88,21 @@ try {
   const finished=(await call(`/api/pk/rooms/${code}`,'GET',undefined,token))[1].room;
   assert.equal(finished.phase,'finished');
   assert.equal(finished.winnerId,player.user.id);
+  assert.equal((await call('/api/pk/rooms','POST',{game:'unknown'},token))[0],400);
+  for(const game of ['merge','flap','puzzle','aim']){
+    const [createdStatus,chosen]=await call('/api/pk/rooms','POST',{game},token);
+    assert.equal(createdStatus,201);
+    assert.equal(chosen.room.game,game);
+    const chosenCode=chosen.room.code;
+    assert.equal((await call(`/api/pk/rooms/${chosenCode}/join`,'POST',{},admin.token))[1].room.game,game);
+    await call(`/api/pk/rooms/${chosenCode}/ready`,'POST',{},token);
+    await call(`/api/pk/rooms/${chosenCode}/ready`,'POST',{},admin.token);
+    wrangler(['d1','execute','sweetfrog-db','--local','--persist-to',state,'--command',`UPDATE pk_rooms SET starts_at=${Date.now()-1000} WHERE code='${chosenCode}'`]);
+    assert.equal((await call(`/api/pk/rooms/${chosenCode}/score`,'POST',{score:12,seq:1},token))[1].room.host.score,12);
+    assert.equal((await call(`/api/pk/rooms/${chosenCode}/score`,'POST',{score:7,seq:2},token))[1].room.host.score,7);
+    assert.equal((await call(`/api/pk/rooms/${chosenCode}/score`,'POST',{score:50,seq:1},token))[1].room.host.score,7);
+    assert.equal((await call(`/api/pk/rooms/${chosenCode}/hit`,'POST',{col:0,step:0},token))[0],400);
+  }
   assert.equal((await call('/api/admin/topics/1','DELETE',undefined,admin.token))[0],200);
   assert.equal((await call('/api/topics/1/replies'))[1].items.length,0);
   assert.equal((await call('/api/admin/suggestions/1','DELETE',undefined,admin.token))[0],200);

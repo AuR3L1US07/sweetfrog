@@ -1,4 +1,7 @@
 import { PK_DURATION_MS, pkRows } from './pk-core.js';
+import { launchPkGame, stopPkGame } from './app.js?v=20261004-pk2';
+
+const games={tap:'逮住大青蛙',merge:'合成大青蛙',flap:'青蛙起飞',puzzle:'青蛙2048',aim:'青蛙定位练习'};
 
 const page = document.createElement('main');
 page.id = 'pk-page';
@@ -16,6 +19,7 @@ const make = (tag, className, text) => { const node = document.createElement(tag
 let me = null, room = null, localScore = null, pendingHits = 0, hitQueue = Promise.resolve();
 let routeId = 0, pollTimer = 0, tickTimer = 0, polling = false, clockOffset = 0;
 let viewCode = '', errorMessage = '';
+let pkLaunched=false,pkResultShown=false,scoreSeq=0,latestScore=null,scoreTimer=0,scoreQueue=Promise.resolve(),pendingScores=0;
 const token = () => { try { return localStorage.getItem('sweetfrog-session') || ''; } catch { return ''; } };
 const now = () => Date.now() - clockOffset;
 
@@ -30,7 +34,7 @@ async function api(path, options={}) {
   return data;
 }
 
-function stopTimers() { clearInterval(pollTimer);clearInterval(tickTimer);pollTimer=0;tickTimer=0;polling=false; }
+function stopTimers() { clearInterval(pollTimer);clearInterval(tickTimer);clearTimeout(scoreTimer);pollTimer=0;tickTimer=0;scoreTimer=0;polling=false; }
 function alertText(text) { const status=content.querySelector('#pk-error');if(status)status.textContent=text;else errorMessage=text; }
 function loginGate() {
   const card=make('section','pk-intro-card');
@@ -41,13 +45,16 @@ function loginGate() {
 }
 function landing() {
   content.replaceChildren();
-  const head=make('div','club-heading');head.innerHTML='<span class="eyebrow">FRIEND VS FRIEND</span><h1>好友 PK</h1><p>开一间房，叫上朋友，同时挑战「逮住大青蛙」。30 秒后见分晓。</p>';
+  const head=make('div','club-heading');head.innerHTML='<span class="eyebrow">FRIEND VS FRIEND</span><h1>好友 PK</h1><p>选五款游戏中的一款，开房叫上朋友。30 秒同场比拼。</p>';
   content.append(head);
   if(!me){loginGate();return;}
   const grid=make('div','pk-entry-grid');
-  const create=make('section','pk-entry-card');create.append(make('span','pk-entry-icon','✳'),make('h2','','我来开房'),make('p','','生成房间码，分享给朋友。两人准备好后一起开局。'));
+  const create=make('section','pk-entry-card');create.append(make('span','pk-entry-icon','✳'),make('h2','','我来开房'),make('p','','先选游戏，再把房间链接发给朋友。'));
+  const choice=make('fieldset','pk-game-choice');choice.append(make('legend','','选择对战游戏'));
+  for(const [key,label] of Object.entries(games)){const option=make('label','pk-game-option');const input=make('input','');input.type='radio';input.name='pk-game';input.value=key;input.checked=key==='tap';option.append(input,make('span','',label));choice.append(option);}
+  create.append(choice);
   const createButton=make('button','pk-main-button','创建房间 →');createButton.type='button';
-  createButton.addEventListener('click',async()=>{createButton.disabled=true;alertText('正在创建房间…');try{const data=await api('',{method:'POST'});location.hash='pk/'+data.room.code;}catch(error){alertText(error.message);createButton.disabled=false;}});
+  createButton.addEventListener('click',async()=>{createButton.disabled=true;alertText('正在创建房间…');try{const game=choice.querySelector('input:checked').value;const data=await api('',{method:'POST',body:{game}});location.hash='pk/'+data.room.code;}catch(error){alertText(error.message);createButton.disabled=false;}});
   create.append(createButton);
   const join=make('section','pk-entry-card');join.append(make('span','pk-entry-icon','↗'),make('h2','','加入朋友的房间'),make('p','','输入六位房间码，和朋友进入同一场对局。'));
   const joinForm=make('form','pk-join-form');const input=make('input','');input.name='code';input.maxLength=6;input.required=true;input.autocomplete='off';input.placeholder='输入房间码';input.setAttribute('aria-label','六位房间码');
@@ -64,11 +71,11 @@ function playerCard(label) {
   card.append(avatar,copy,make('strong','pk-player-score','0'));return card;
 }
 function mountRoom(code) {
-  content.replaceChildren();viewCode=code;localScore=null;pendingHits=0;hitQueue=Promise.resolve();
-  const head=make('div','club-heading');head.innerHTML='<span class="eyebrow">LIVE FRIEND MATCH</span><h1>逮住大青蛙 · PK</h1><p>双方同题，30 秒比手速。只点最底下一排的头像。</p>';
+  content.replaceChildren();viewCode=code;localScore=null;pendingHits=0;hitQueue=Promise.resolve();pkLaunched=false;pkResultShown=false;scoreSeq=0;latestScore=null;scoreQueue=Promise.resolve();pendingScores=0;
+  const head=make('div','club-heading');head.innerHTML='<span class="eyebrow">LIVE FRIEND MATCH</span><h1 id="pk-game-title">好友 PK</h1><p id="pk-game-description">正在读取房间选择的游戏…</p>';
   const back=make('a','forum-back','← 返回好友 PK');back.href='#pk';
   const roomCard=make('section','pk-room-card');
-  const info=make('div','pk-room-info');info.append(make('span','','房间码'),make('strong','',code));
+  const info=make('div','pk-room-info');info.append(make('span','','房间码'),make('strong','',code),make('span','pk-room-game',''));
   const share=make('button','pk-share','复制邀请链接');share.type='button';share.addEventListener('click',async()=>{try{await navigator.clipboard.writeText(location.href);share.textContent='已复制，发给朋友吧';}catch{share.textContent='请复制浏览器地址分享';}});
   const players=make('div','pk-players');players.append(playerCard('房主'),make('span','pk-versus','VS'),playerCard('挑战者'));
   const status=make('div','pk-status','正在连接房间…');status.id='pk-status';status.setAttribute('role','status');
@@ -103,6 +110,15 @@ function phaseFor(roomState) {
   if(!roomState.startsAt)return roomState.guest?'ready':'waiting';
   const time=now();return time<roomState.startsAt?'countdown':time<roomState.endsAt?'playing':'finished';
 }
+function flushScore(){
+  clearTimeout(scoreTimer);scoreTimer=0;
+  if(!room||room.game==='tap'||latestScore===null||!viewCode)return;
+  const code=viewCode,value=latestScore,seq=++scoreSeq;
+  latestScore=null;pendingScores++;
+  scoreQueue=scoreQueue.then(async()=>{try{const data=await api('/'+code+'/score',{method:'POST',body:{score:value,seq}});applyRoom(data.room);}catch(error){alertText(error.message);}finally{pendingScores--;if(pendingScores===0)await poll();}});
+}
+window.addEventListener('sweetfrog:pk-score',event=>{if(!room||room.game!==event.detail.game||!pkLaunched)return;latestScore=event.detail.score;if(!scoreTimer)scoreTimer=setTimeout(flushScore,250);});
+window.addEventListener('sweetfrog:pk-finished',event=>{if(!room||room.game!==event.detail.game)return;latestScore=event.detail.score;flushScore();});
 function tick() {
   if(!room||viewCode!==room.code)return;
   const phase=phaseFor(room),status=content.querySelector('#pk-status'),game=content.querySelector('#pk-game');
@@ -112,18 +128,23 @@ function tick() {
   if(phase==='waiting')status.textContent='等待朋友加入…复制链接发给对方吧。';
   else if(phase==='ready')status.textContent=own?.ready?'已准备，等待朋友点击准备。':'朋友已加入，点“准备好了”即可开局。';
   else if(phase==='countdown')status.textContent=`准备开局 · ${Math.max(1,Math.ceil((room.startsAt-now())/1000))}`;
-  else if(phase==='playing')status.textContent='PK 进行中 · 稳住，别点错！';
-  else if(pendingHits)status.textContent='时间到，正在核对最后的成绩…';
+  else if(phase==='playing')status.textContent=`${games[room.game]} PK 进行中 · 稳住节奏！`;
+  else if(pendingHits||pendingScores||scoreTimer)status.textContent='时间到，正在核对最后的成绩…';
   else status.textContent=room.host.score===room.guest.score?'平局！再开一房继续比吧。':room.winnerId===me?.id?'你赢了！这局手速属于你。':'这局朋友更快，下次扳回来！';
-  game.hidden=phase!=='playing';
+  game.hidden=phase!=='playing'||room.game!=='tap';
   const timer=content.querySelector('.pk-timer');if(timer)timer.textContent=`${Math.max(0,(room.endsAt-now())/1000).toFixed(1)} 秒`;
-  if(phase==='playing'&&localScore===null){localScore=own?.score||0;renderBoard();}
+  if(phase==='playing'&&room.game==='tap'&&localScore===null){localScore=own?.score||0;renderBoard();}
+  if(phase==='playing'&&room.game!=='tap'&&!pkLaunched){pkLaunched=true;page.hidden=true;launchPkGame(room.game,room.seed,room.endsAt+clockOffset);}
+  if(phase==='finished'&&room.game!=='tap'&&pkLaunched&&!pkResultShown&&!pendingScores&&!scoreTimer){pkResultShown=true;stopPkGame();page.hidden=false;document.querySelector('#lobby').hidden=true;window.scrollTo(0,0);}
 }
 function applyRoom(next) {
   if(viewCode!==next.code)return;
-  if(room&&room.code===next.code&&(next.host.score<room.host.score||next.guest?.score<(room.guest?.score||0)))return;
+  if(room&&room.code===next.code&&(next.game==='tap'&&(next.host.score<room.host.score||next.guest?.score<(room.guest?.score||0))||next.game!=='tap'&&(next.host.seq<room.host.seq||next.guest?.seq<(room.guest?.seq||0))))return;
   clockOffset=Date.now()-next.serverNow;
   room=next;
+  content.querySelector('#pk-game-title').textContent=games[room.game]+' · PK';
+  content.querySelector('#pk-game-description').textContent=room.game==='tap'?'双方同题，30 秒比手速。只点最底下一排的头像。':'两人同时玩「'+games[room.game]+'」，30 秒内分数更高的一方获胜。';
+  content.querySelector('.pk-room-game').textContent=games[room.game];
   const cards=content.querySelectorAll('.pk-player');
   for(const [index,player] of [room.host,room.guest].entries()){
     const card=cards[index];card.querySelector('.pk-player-name').textContent=player?.name||'等待加入';
@@ -133,12 +154,14 @@ function applyRoom(next) {
     card.classList.toggle('is-ready',Boolean(player?.ready));
   }
   const own=me?.id===room.host.id?room.host:room.guest;
+  scoreSeq=Math.max(scoreSeq,own?.seq||0);
   if(localScore!==null&&pendingHits===0&&localScore!==own.score){localScore=own.score;renderBoard();}
   if(localScore!==null&&cards.length)cards[me?.id===room.host.id?0:1].querySelector('.pk-player-score').textContent=String(localScore);
+  if(room.game!=='tap'&&pkLaunched){const opponent=me?.id===room.host.id?room.guest:room.host;document.querySelector('#best').textContent=String(opponent?.score||0);}
   tick();
 }
 async function poll() {
-  if(polling||!viewCode||page.hidden)return;polling=true;
+  if(polling||!viewCode||!location.hash.toLowerCase().startsWith('#pk/'))return;polling=true;
   try{const data=await api('/'+viewCode);applyRoom(data.room);alertText('');}
   catch(error){alertText(error.message);}
   finally{polling=false;}
@@ -155,7 +178,7 @@ function hit(col) {
 }
 async function route() {
   const match=/^pk(?:\/([A-HJ-NP-Z2-9]{6}))?$/.exec(location.hash.slice(1).toUpperCase().replace(/^PK/,'pk'));
-  const id=++routeId;stopTimers();room=null;viewCode='';page.hidden=!match;nav.classList.toggle('active',Boolean(match));
+  const id=++routeId;stopTimers();stopPkGame();room=null;viewCode='';page.hidden=!match;nav.classList.toggle('active',Boolean(match));
   if(!match)return;
   document.querySelector('#lobby').hidden=true;document.querySelector('#game-screen').hidden=true;
   document.querySelector('#club-page').hidden=true;

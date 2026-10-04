@@ -36,6 +36,7 @@ try {
   await visitor.getByRole('button',{name:'创建账号 ↗'}).click();
   await visitor.waitForURL('**/#pk');
   await visitor.getByRole('button',{name:'创建房间 →'}).waitFor();
+  await visitor.screenshot({path:'tests/pk-choose-mobile-preview.png',fullPage:true});
   await visitor.close();
   const hostPage=await browser.newPage({viewport:{width:1280,height:900}});
   const guestPage=await browser.newPage({viewport:{width:390,height:850}});
@@ -64,8 +65,31 @@ try {
   await guestPage.reload();
   await guestPage.getByText(host.user.username).waitFor();
   assert.equal(await guestPage.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  for(const [game,title] of [['merge','合成大青蛙'],['flap','青蛙起飞'],['puzzle','青蛙2048'],['aim','青蛙定位练习']]){
+    await hostPage.goto(base+'/#pk');
+    await hostPage.locator(`.pk-game-option input[value="${game}"]`).check();
+    await hostPage.getByRole('button',{name:'创建房间 →'}).click();
+    await hostPage.waitForURL('**/#pk/*');
+    const selectedCode=(new URL(hostPage.url())).hash.slice(4);
+    await guestPage.goto(base+'/#pk/'+selectedCode);
+    await guestPage.locator('.pk-room-game').getByText(title,{exact:true}).waitFor();
+    await hostPage.getByRole('button',{name:'准备好了 →'}).click();
+    await guestPage.getByRole('button',{name:'准备好了 →'}).click();
+    await hostPage.locator('#game-screen').waitFor({state:'visible',timeout:10000});
+    await guestPage.locator('#game-screen').waitFor({state:'visible',timeout:10000});
+    assert.equal(await hostPage.locator('#game-title').textContent(),title);
+    if(game==='aim')await guestPage.screenshot({path:'tests/pk-aim-mobile-preview.png',fullPage:true});
+    if(game==='merge')await hostPage.locator('#game-stage canvas').click();
+    if(game==='flap')await hostPage.locator('#game-stage canvas').click();
+    if(game==='puzzle')for(const key of ['ArrowLeft','ArrowDown','ArrowRight'])await hostPage.keyboard.press(key);
+    if(game==='aim')await hostPage.locator('.aim-target').click();
+    if(['puzzle','aim'].includes(game)){
+      await hostPage.waitForFunction(()=>Number(document.querySelector('#score').textContent)>0);
+      await guestPage.waitForFunction(()=>Number(document.querySelector('.pk-player-score').textContent)>0,{timeout:5000});
+    }
+  }
   assert.deepEqual(errors,[]);
-  console.log('PASS: two browsers create/join, ready countdown, live score, refresh recovery, mobile layout');
+  console.log('PASS: two browsers create/join, all five game choices, countdown, live score, refresh recovery, mobile layout');
 } finally {
   await browser?.close();
   if(server){const stopped=new Promise(resolve=>server.once('exit',resolve));server.kill();await stopped;}

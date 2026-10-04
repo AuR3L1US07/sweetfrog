@@ -144,20 +144,22 @@ export async function handleApi(request, env) {
       }
     }
 
-    const roomPath=/^\/api\/pk\/rooms\/([A-HJ-NP-Z2-9]{6})(?:\/(join|ready|hit))?$/.exec(path);
+    const roomPath=/^\/api\/pk\/rooms\/([A-HJ-NP-Z2-9]{6})(?:\/(join|ready|hit|score))?$/.exec(path);
     const roomQuery=`SELECT r.*,h.username AS host_name,g.username AS guest_name FROM pk_rooms r JOIN users h ON h.id=r.host_id LEFT JOIN users g ON g.id=r.guest_id WHERE r.code=?`;
     const getRoom=code=>first(roomQuery,code);
     function roomState(room,now=Date.now()) {
       const phase=!room.guest_id?'waiting':!room.starts_at?'ready':now<room.starts_at?'countdown':now<room.starts_at+PK_DURATION_MS?'playing':'finished';
-      return {code:room.code,game:'tap',phase,serverNow:now,startsAt:room.starts_at,endsAt:room.starts_at?room.starts_at+PK_DURATION_MS:null,seed:room.seed,host:{id:room.host_id,name:room.host_name,ready:Boolean(room.host_ready),score:room.host_score},guest:room.guest_id?{id:room.guest_id,name:room.guest_name,ready:Boolean(room.guest_ready),score:room.guest_score}:null,winnerId:phase==='finished'?(room.host_score===room.guest_score?null:room.host_score>room.guest_score?room.host_id:room.guest_id):null,rows:pkRows(room.seed,user?.id===room.host_id?room.host_score:room.guest_score)};
+      return {code:room.code,game:room.game,phase,serverNow:now,startsAt:room.starts_at,endsAt:room.starts_at?room.starts_at+PK_DURATION_MS:null,seed:room.seed,host:{id:room.host_id,name:room.host_name,ready:Boolean(room.host_ready),score:room.host_score,seq:room.host_seq},guest:room.guest_id?{id:room.guest_id,name:room.guest_name,ready:Boolean(room.guest_ready),score:room.guest_score,seq:room.guest_seq}:null,winnerId:phase==='finished'?(room.host_score===room.guest_score?null:room.host_score>room.guest_score?room.host_id:room.guest_id):null,rows:room.game==='tap'?pkRows(room.seed,user?.id===room.host_id?room.host_score:room.guest_score):null};
     }
     if(method==='POST' && path==='/api/pk/rooms') {
       requireUser();await rate(`pk-create:${user.id}`,12);
+      const game=(await body(request)).game || 'tap';
+      if(!['tap','merge','flap','puzzle','aim'].includes(game))fail(400,'请选择支持的游戏');
       await run('DELETE FROM pk_rooms WHERE created_at<?',Date.now()-30*86400000);
       const alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
       for(let attempt=0;attempt<5;attempt++){
         const code=Array.from(crypto.getRandomValues(new Uint8Array(6)),value=>alphabet[value%alphabet.length]).join('');
-        try{await run('INSERT INTO pk_rooms(code,host_id,seed,created_at) VALUES(?,?,?,?)',code,user.id,crypto.getRandomValues(new Uint32Array(1))[0],Date.now());return json({room:roomState(await getRoom(code))},201);}
+        try{await run('INSERT INTO pk_rooms(code,host_id,game,seed,created_at) VALUES(?,?,?,?,?)',code,user.id,game,crypto.getRandomValues(new Uint32Array(1))[0],Date.now());return json({room:roomState(await getRoom(code))},201);}
         catch(error){if(!String(error).includes('UNIQUE'))throw error;}
       }
       fail(503,'创建房间失败，请重试');
@@ -185,6 +187,7 @@ export async function handleApi(request, env) {
         return json({room:roomState(await getRoom(code))});
       }
       if(action==='hit'&&method==='POST'){
+        if(room.game!=='tap')fail(400,'此游戏不使用点格模式');
         const data=await body(request),col=data.col,step=data.step,now=Date.now();
         if(!Number.isInteger(col)||col<0||col>3||!Number.isInteger(step)||step<0||step>300)fail(400,'操作无效');
         if(!room.starts_at||now<room.starts_at||now>room.starts_at+PK_DURATION_MS+1200)fail(409,'本局尚未开始或已经结束');
@@ -197,6 +200,17 @@ export async function handleApi(request, env) {
         if(!result.meta.changes)fail(409,'成绩已更新，请同步房间');
         room=await getRoom(code);
         return json({correct:true,room:roomState(room)});
+      }
+      if(action==='score'&&method==='POST'){
+        if(room.game==='tap')fail(400,'点格模式需要逐次命中');
+        const data=await body(request),value=data.score,seq=data.seq,now=Date.now();
+        const caps={merge:1000000,flap:50,puzzle:1000000,aim:1000000};
+        if(!Number.isSafeInteger(value)||value<0||value>caps[room.game]||!Number.isSafeInteger(seq)||seq<1||seq>10000)fail(400,'成绩无效');
+        if(!room.starts_at||now<room.starts_at||now>room.starts_at+PK_DURATION_MS+1200)fail(409,'本局尚未开始或已经结束');
+        const isHost=user.id===room.host_id,scoreColumn=isHost?'host_score':'guest_score',seqColumn=isHost?'host_seq':'guest_seq';
+        if(seq<=room[seqColumn])return json({ok:true,room:roomState(room)});
+        await run(`UPDATE pk_rooms SET ${scoreColumn}=?,${seqColumn}=? WHERE code=? AND ${seqColumn}<? AND starts_at<=? AND starts_at+? >=?`,value,seq,code,seq,now,PK_DURATION_MS+1200,now);
+        return json({ok:true,room:roomState(await getRoom(code))});
       }
       fail(405,'请求方法不支持');
     }
