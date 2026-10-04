@@ -1,4 +1,6 @@
 tests/*.png
 node_modules/
 data/
+dist/
+.wrangler/
 .DS_Store

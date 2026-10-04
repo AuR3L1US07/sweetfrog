@@ -1,1 +1,17 @@
-{"name":"sweetfrog","version":"1.0.0","private":true,"type":"module","scripts":{"test":"node --test tests/core.test.js tests/aim.test.js"}}
+{
+  "name": "sweetfrog",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:pages": "node scripts/build-pages.mjs",
+    "test": "node --test tests/*.test.*",
+    "test:cloudflare": "node scripts/build-pages.mjs && node tests/cloudflare-integration.mjs"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "devDependencies": {
+    "wrangler": "^4.147.0"
+  },
+  "packageManager": "pnpm@11.19.0"
+}

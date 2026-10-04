@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sweetfrog",
+  "pages_build_output_dir": "./dist",
+  "compatibility_date": "2026-10-01",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "sweetfrog-db",
+      "database_id": "d804f9a7-28ca-4c94-b33e-46a5c8bbead9"
+    }
+  ]
+}
