@@ -3,7 +3,8 @@ import { iconSvg } from './icons.js';
 import { beijingTime } from './beijing-time.js';
 
 const games = { tap:'逮住大青蛙', merge:'合成大青蛙', flap:'青蛙起飞', puzzle:'青蛙2048', aim:'青蛙定位练习' };
-const routes = new Set(['suggestions','discussion','leaderboard','account','profile']);
+const routes = new Set(['suggestions','discussion','leaderboard','notifications','account','profile']);
+const titleNames={apprentice:'青蛙学徒',first_win:'小试牛刀',three_wins:'连胜高手',sharp_eye:'百步穿杨'};
 const $ = selector => document.querySelector(selector);
 const el = (tag,className,text) => { const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node; };
 const makeButton = (label,onClick,className='') => { const node=el('button',className,label);node.type='button';node.addEventListener('click',onClick);return node; };
@@ -12,6 +13,7 @@ page.innerHTML=`<nav class="club-breadcrumb" aria-label="当前位置"><a href="
 $('#game-screen').before(page);
 const nav=$('.site-header nav');
 for(const [route,label] of [['suggestions','意见留言'],['discussion','玩家社区'],['leaderboard','排行榜']]){const link=el('a','club-nav-link',label);link.href='#'+route;link.dataset.clubNav=route;nav.insertBefore(link,$('#sound-toggle'));}
+const notificationLink=el('a','club-nav-link','通知');notificationLink.href='#notifications';notificationLink.dataset.clubNav='notifications';const notificationBadge=el('span','nav-badge');notificationBadge.hidden=true;notificationLink.append(notificationBadge);nav.insertBefore(notificationLink,$('#sound-toggle'));
 const rankLink=el('a','game-rank-link','查看本游戏排行榜 ↗');rankLink.href='#leaderboard';$('#game-screen .play-footer').before(rankLink);
 let token='';try{token=localStorage.getItem('sweetfrog-session')||'';}catch{}
 let user=null,rankGame='match',accountMode='login',returnTo='games',accountMessage='',avatarVersion=0;
@@ -24,10 +26,13 @@ async function refreshSession(){if(!token){user=null;return;}try{user=(await req
 function clearSession(){token='';user=null;try{localStorage.removeItem('sweetfrog-session');}catch{}}
 function avatarUrl(id){return id?`/api/avatars/${id}${user?.id===id?`?v=${avatarVersion}`:''}`:'./assets/default-frog-avatar.svg';}
 function memberAvatar(id,name,className='club-avatar'){const img=el('img',className);img.src=avatarUrl(id);img.alt=name?`${name}的头像`:'卡通青蛙头像';img.loading='lazy';img.onerror=()=>{img.onerror=null;img.src='./assets/default-frog-avatar.svg';};return img;}
-function syncAdminLink(){let link=$('#admin-nav-link');if(user?.role==='admin'&&!link){link=el('a','club-nav-link','管理后台');link.id='admin-nav-link';link.href='./admin.html';$('#sound-toggle').before(link);}else if(user?.role!=='admin')link?.remove();const chip=$('#account-chip');chip.href=user?'#profile':'#account';if(user)chip.replaceChildren(memberAvatar(user.id,'','account-chip-avatar'),el('span','account-chip-name',user.username));else{const symbol=el('span','account-chip-symbol');symbol.innerHTML=iconSvg('user');chip.replaceChildren(symbol,el('span','account-chip-name','登录'));}chip.classList.toggle('signed-in',Boolean(user));chip.setAttribute('aria-label',user?`个人信息：${user.username}，悬停可查看账号菜单`:'登录或注册');const popover=$('#account-popover');if(popover)popover.hidden=!user;const admin=$('.account-admin-link');if(admin)admin.hidden=user?.role!=='admin';}
+function syncAdminLink(){let link=$('#admin-nav-link');if(user?.role==='admin'&&!link){link=el('a','club-nav-link','管理后台');link.id='admin-nav-link';link.href='./admin.html';$('#sound-toggle').before(link);}else if(user?.role!=='admin')link?.remove();const chip=$('#account-chip');chip.href=user?'#profile':'#account';if(user)chip.replaceChildren(memberAvatar(user.id,'','account-chip-avatar'),el('span','account-chip-name',user.username),el('small','account-chip-title',titleNames[user.titleKey]||titleNames.apprentice));else{const symbol=el('span','account-chip-symbol');symbol.innerHTML=iconSvg('user');chip.replaceChildren(symbol,el('span','account-chip-name','登录'));}chip.classList.toggle('signed-in',Boolean(user));chip.setAttribute('aria-label',user?`个人信息：${user.username}，称号${titleNames[user.titleKey]||titleNames.apprentice}`:'登录或注册');const popover=$('#account-popover');if(popover)popover.hidden=!user;const admin=$('.account-admin-link');if(admin)admin.hidden=user?.role!=='admin';if(!user)setNotificationBadge(0);}
+function setNotificationBadge(count){notificationBadge.hidden=!count;notificationBadge.textContent=count>99?'99+':String(count);notificationLink.setAttribute('aria-label',count?`通知，${count} 条未读`:'通知');}
+async function refreshNotifications(){if(!user){setNotificationBadge(0);return;}try{const data=await request('/api/notifications');setNotificationBadge(data.unread);}catch{}}
+setInterval(()=>{if(!document.hidden)refreshNotifications();},15000);
 async function logoutAccount(){try{await request('/api/logout',{method:'POST'});}catch{}clearSession();syncAdminLink();location.hash='account';renderCurrent();}
 window.addEventListener('sweetfrog:logout',logoutAccount);
-function saveSession(data){token=data.token;user=data.user;try{localStorage.setItem('sweetfrog-session',token);}catch{}syncAdminLink();}
+function saveSession(data){token=data.token;user=data.user;try{localStorage.setItem('sweetfrog-session',token);}catch{}syncAdminLink();refreshNotifications();}
 function heading(eyebrow,title,description){const wrap=el('div','club-heading');wrap.innerHTML=`<span class="eyebrow"></span><h1></h1><p></p>`;wrap.querySelector('.eyebrow').textContent=eyebrow;wrap.querySelector('h1').textContent=title;wrap.querySelector('p').textContent=description;return wrap;}
 function notice(message){return el('p','club-notice',message);}
 function time(value){return beijingTime(value);}
@@ -130,11 +135,26 @@ async function prepareAvatar(file){
     return data;
   }finally{URL.revokeObjectURL(url);}
 }
+async function notifications(content){
+  content.append(heading('FROG MAIL','消息通知','帖子回复、建议点赞和好友申请都在这里。'));
+  if(!user){content.append(gate('登录后可以查看消息通知。'));return;}
+  const list=el('div','notification-list');content.append(list);
+  try{
+    const data=await request('/api/notifications');setNotificationBadge(data.unread);
+    if(!data.items.length)list.append(notice('还没有新消息。去社区逛逛吧。'));
+    for(const item of data.items){
+      const card=el('a','notification-item'+(item.readAt?'':' is-unread'));
+      const detail=item.kind==='reply'?['回复了你的帖子',`#discussion/${item.targetId}`]:item.kind==='vote'?['赞了你的建议',`#suggestions/${item.targetId}`]:['申请加你为好友','#friends'];
+      card.href=detail[1];card.append(el('strong','',item.actorName+' '+detail[0]),el('time','',beijingTime(item.createdAt,'full')),el('span','','查看 →'));list.append(card);
+    }
+    if(data.unread){await request('/api/notifications',{method:'POST'});setNotificationBadge(0);}
+  }catch(error){list.append(notice(friendlyError(error)));}
+}
 async function profile(content){
   content.append(heading('MY FROG ID','个人信息','查看账号资料，修改昵称或密码。'));
   if(!user){content.append(gate('请先登录后查看个人信息。'));return;}
   const overview=el('section','profile-overview account-card');
-  overview.append(el('span','profile-eyebrow','PLAYER CARD'),el('h2','',user.username));
+  overview.append(el('span','profile-eyebrow','PLAYER CARD'),el('h2','',user.username),el('span','profile-current-title',titleNames[user.titleKey]||titleNames.apprentice));
   const facts=el('dl','profile-facts');facts.append(el('dt','','玩家 ID'),el('dd','',String(user.publicId)),el('dt','','账号身份'),el('dd','',user.role==='admin'?'管理员':'玩家'));
   overview.append(facts);content.append(overview);
   const avatarPanel=el('section','profile-avatar-panel');
@@ -160,6 +180,15 @@ async function profile(content){
   const recordValues=el('div','profile-match-values');matchRecord.append(recordValues);overview.append(matchRecord);
   try{const {stats}=await request('/api/match/stats');for(const [label,value] of [['胜利',stats.wins],['失败',stats.losses],['平局',stats.draws],['胜率',`${stats.winRate}%`]]){const item=el('div','profile-match-value');item.append(el('strong','',String(value)),el('span','',label));recordValues.append(item);}}
   catch(error){matchRecord.append(notice(friendlyError(error)));}
+  const history=el('section','profile-panel profile-history');history.append(el('span','profile-section-kicker','MATCH HISTORY'),el('h2','','最近对局'),el('p','profile-section-copy','查看最近 20 场快速匹配的对手、游戏和分数。'));
+  const historyList=el('div','profile-history-list');history.append(historyList);content.append(history);
+  try{const {items}=await request('/api/match/history');if(!items.length)historyList.append(notice('还没有匹配记录，去打一场吧。'));for(const item of items){const row=el('div','profile-history-row');row.append(memberAvatar(item.opponentId,item.opponentName,'profile-history-avatar'));const detail=el('div','profile-history-detail');detail.append(el('strong','',`${games[item.game]||'未知游戏'} · ${item.opponentName}`),el('time','',beijingTime(item.finishedAt,'full')));row.append(detail,el('span','profile-history-score',`${item.ownScore??'—'} : ${item.opponentScore??'—'}`),el('b','profile-history-result '+item.result,{win:'胜利',loss:'失败',draw:'平局'}[item.result]));historyList.append(row);}}
+  catch(error){historyList.append(notice(friendlyError(error)));}
+  const achievements=el('section','profile-panel profile-achievements');achievements.append(el('span','profile-section-kicker','FROG TITLES'),el('h2','','成就与称号'),el('p','profile-section-copy','完成挑战后解锁称号，选中的称号会显示在头像旁。'));
+  const titleList=el('div','profile-title-list');achievements.append(titleList);content.append(achievements);
+  try{const data=await request('/api/profile/titles');const descriptions={apprentice:'加入青蛙游戏厅即可获得',first_win:'快速匹配赢得第一场',three_wins:'快速匹配连续赢得 3 场',sharp_eye:'青蛙定位练习至少命中 10 次，命中率达 90%'};
+    for(const [key,label] of Object.entries(titleNames)){const unlocked=data.unlocked[key],card=el('div','profile-title-card'+(unlocked?'':' is-locked'));const copy=el('div','');copy.append(el('strong','',label),el('span','',descriptions[key]));const button=makeButton(key===data.selected?'佩戴中':unlocked?'佩戴称号':'未解锁',async()=>{button.disabled=true;try{const result=await request('/api/profile/titles',{method:'POST',body:JSON.stringify({key})});user.titleKey=result.titleKey;syncAdminLink();overview.querySelector('.profile-current-title').textContent=label;titleList.querySelectorAll('button').forEach(item=>{item.textContent=item.dataset.unlocked==='true'?'佩戴称号':'未解锁';item.disabled=item.dataset.unlocked!=='true';});button.textContent='佩戴中';button.disabled=true;}catch(error){achievements.append(notice(friendlyError(error)));button.disabled=false;}},'profile-title-button');button.dataset.unlocked=String(unlocked);button.disabled=!unlocked||key===data.selected;card.append(copy,button);titleList.append(card);}
+  }catch(error){titleList.append(notice(friendlyError(error)));}
   const settings=el('section','profile-settings');settings.append(el('span','profile-section-kicker','账号设置'),el('h2','','账号与安全'),el('p','profile-settings-intro','选择一项修改；保存时需填写当前密码。'));
   const tabs=el('div','profile-settings-tabs');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','账号设置');
   const grid=el('div','profile-grid');settings.append(tabs,grid);content.append(settings);
@@ -184,7 +213,7 @@ function account(content){
   formNode.addEventListener('submit',async event=>{event.preventDefault();const button=formNode.querySelector('button'),status=formNode.querySelector('[role=status]');button.disabled=true;status.textContent='正在处理…';try{const data=await request('/api/'+accountMode,{method:'POST',body:JSON.stringify({username:formNode.elements.username.value.trim(),password:formNode.elements.password.value})});saveSession(data);location.hash=returnTo;returnTo='games';}catch(error){status.textContent=friendlyError(error);}finally{button.disabled=false;}});
   content.append(formNode);const guest=el('a','guest-link','游客登录 · 先逛逛 →');guest.href='#games';content.append(guest);
 }
-async function renderCurrent(){const route=location.hash.slice(1),detail=/^(suggestions|discussion)\/(new|\d+)$/.exec(route),base=detail?.[1]||route,visible=routes.has(base);page.hidden=!visible;if(!visible)return;if(base==='account'&&user){location.hash='profile';return;}$('#lobby').hidden=true;$('#game-screen').hidden=true;const content=el('div');content.id='club-content';$('#club-content').replaceWith(content);$('#club-location').textContent={suggestions:'意见留言',discussion:'玩家社区',leaderboard:'排行榜',account:'登录 / 注册',profile:'个人信息'}[base];document.querySelectorAll('[data-club-nav]').forEach(link=>link.classList.toggle('active',link.dataset.clubNav===base));if(detail){if(detail[2]==='new')composePage(content,base);else if(base==='suggestions')await suggestionDetail(content,detail[2]);else await topicDetail(content,detail[2]);}else if(base==='suggestions')await suggestions(content);else if(base==='discussion')await discussion(content);else if(base==='leaderboard')await leaderboard(content);else if(base==='profile')await profile(content);else account(content);}
+async function renderCurrent(){const route=location.hash.slice(1),detail=/^(suggestions|discussion)\/(new|\d+)$/.exec(route),base=detail?.[1]||route,visible=routes.has(base);page.hidden=!visible;if(!visible)return;if(base==='account'&&user){location.hash='profile';return;}$('#lobby').hidden=true;$('#game-screen').hidden=true;const content=el('div');content.id='club-content';$('#club-content').replaceWith(content);$('#club-location').textContent={suggestions:'意见留言',discussion:'玩家社区',leaderboard:'排行榜',notifications:'消息通知',account:'登录 / 注册',profile:'个人信息'}[base];document.querySelectorAll('[data-club-nav]').forEach(link=>link.classList.toggle('active',link.dataset.clubNav===base));if(detail){if(detail[2]==='new')composePage(content,base);else if(base==='suggestions')await suggestionDetail(content,detail[2]);else await topicDetail(content,detail[2]);}else if(base==='suggestions')await suggestions(content);else if(base==='discussion')await discussion(content);else if(base==='leaderboard')await leaderboard(content);else if(base==='notifications')await notifications(content);else if(base==='profile')await profile(content);else account(content);}
 window.addEventListener('hashchange',renderCurrent);
-window.addEventListener('sweetfrog:finished',async event=>{if(!user)return;const {game,score}=event.detail;if(!games[game])return;try{await request(`/api/leaderboards/${game}`,{method:'POST',body:JSON.stringify({score})});}catch(error){console.warn('成绩提交失败:',friendlyError(error));}});
-await refreshSession();syncAdminLink();renderCurrent();
+window.addEventListener('sweetfrog:finished',async event=>{if(!user)return;const {game,score,hits,shots}=event.detail;if(!games[game])return;try{await request(`/api/leaderboards/${game}`,{method:'POST',body:JSON.stringify({score,...(game==='aim'?{hits,shots}:{})})});}catch(error){console.warn('成绩提交失败:',friendlyError(error));}});
+await refreshSession();syncAdminLink();refreshNotifications();renderCurrent();

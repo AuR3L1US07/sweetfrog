@@ -1,5 +1,5 @@
 import { PK_DURATION_MS, pkRows } from './pk-core.js';
-import { launchPkGame, stopPkGame } from './app.js?v=20261005-random-match';
+import { launchPkGame, stopPkGame } from './app.js?v=20261005-history';
 import { iconSvg } from './icons.js';
 
 const games={tap:'逮住大青蛙',merge:'合成大青蛙',flap:'青蛙起飞',puzzle:'青蛙2048',aim:'青蛙定位练习'};

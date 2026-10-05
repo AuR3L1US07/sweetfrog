@@ -25,7 +25,7 @@ try{
   await guestPage.addInitScript(value=>localStorage.setItem('sweetfrog-session',value),guest.token);
   await hostPage.goto(base+'/#friends');await guestPage.goto(base+'/#friends');
   await hostPage.waitForFunction(()=>document.querySelector('#account-chip .account-chip-name')?.textContent?.startsWith('friendhost'));
-  assert.equal(await hostPage.locator('#account-chip small').count(),0);
+  assert.equal(await hostPage.locator('#account-chip .account-chip-title').textContent(),'青蛙学徒');
   for(const section of ['tap','suggestions','discussion','leaderboard','friends']){
     await hostPage.evaluate(section=>location.hash=section,section);
     await hostPage.waitForFunction(section=>{

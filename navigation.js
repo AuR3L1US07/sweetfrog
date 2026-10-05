@@ -22,7 +22,7 @@ document.addEventListener('click',event=>{if(!accountMenu.contains(event.target)
 window.addEventListener('keydown',event=>{if(event.key==='Escape'&&accountMenu.classList.contains('open')){closeAccountMenu();account.focus();}});
 window.addEventListener('hashchange',closeAccountMenu);
 const menu=document.createElement('button');menu.type='button';menu.id='nav-menu-toggle';menu.className='nav-menu-toggle';menu.setAttribute('aria-controls','site-navigation');menu.setAttribute('aria-expanded','false');menu.setAttribute('aria-label','展开功能菜单');header.append(menu);
-function syncMenuBadge(){const source=nav.querySelector('#friends-badge'),target=menu.querySelector('.nav-menu-badge');if(!target)return;target.hidden=!source||source.hidden;target.textContent=source?.textContent||'';}
+function syncMenuBadge(){const target=menu.querySelector('.nav-menu-badge');if(!target)return;const count=[...nav.querySelectorAll('.nav-badge')].filter(node=>!node.hidden).reduce((sum,node)=>sum+Number(node.textContent||0),0);target.hidden=!count;target.textContent=count>99?'99+':String(count);}
 function renderMenu(open){menu.innerHTML=iconSvg(open?'close':'menu')+'<span>菜单</span><small class="nav-menu-badge" hidden></small>';syncMenuBadge();}
 renderMenu(false);
 const backdrop=document.createElement('button');backdrop.type='button';backdrop.id='nav-backdrop';backdrop.hidden=true;backdrop.setAttribute('aria-label','关闭功能菜单');document.body.append(backdrop);
@@ -30,7 +30,7 @@ const drawerHead=document.createElement('div');drawerHead.className='nav-drawer-
 const close=document.createElement('button');close.type='button';close.setAttribute('aria-label','关闭功能菜单');close.innerHTML=iconSvg('close');drawerHead.append(close);nav.prepend(drawerHead);
 const labels={
   '#games':['frog','大厅'],'#pk':['swords','对战'],'#match':['match','匹配'],
-  '#suggestions':['note','留言'],'#discussion':['topic','社区'],
+  '#suggestions':['note','留言'],'#discussion':['topic','社区'],'#notifications':['note','通知'],
   '#leaderboard':['trophy','排行'],'#friends':['people','好友'],
   './admin.html':['settings','后台']
 };

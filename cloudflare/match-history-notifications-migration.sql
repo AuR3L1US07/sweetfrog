@@ -1,0 +1,10 @@
+ALTER TABLE users ADD COLUMN title_key TEXT NOT NULL DEFAULT 'apprentice';
+ALTER TABLE users ADD COLUMN aim_mastered INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE match_results ADD COLUMN game TEXT;
+ALTER TABLE match_results ADD COLUMN host_score INTEGER;
+ALTER TABLE match_results ADD COLUMN guest_score INTEGER;
+ALTER TABLE match_results ADD COLUMN host_name TEXT;
+ALTER TABLE match_results ADD COLUMN guest_name TEXT;
+UPDATE match_results SET game=(SELECT game FROM pk_rooms WHERE code=match_results.room_code), host_score=(SELECT host_score FROM pk_rooms WHERE code=match_results.room_code AND round=match_results.round), guest_score=(SELECT guest_score FROM pk_rooms WHERE code=match_results.room_code AND round=match_results.round), host_name=(SELECT username FROM users WHERE id=match_results.host_id), guest_name=(SELECT username FROM users WHERE id=match_results.guest_id);
+CREATE TABLE IF NOT EXISTS notifications(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), actor_id INTEGER NOT NULL REFERENCES users(id), kind TEXT NOT NULL CHECK(kind IN ('reply','vote','friend')), target_id INTEGER NOT NULL, created_at INTEGER NOT NULL, read_at INTEGER);
+CREATE INDEX IF NOT EXISTS idx_notifications_inbox ON notifications(user_id,read_at,created_at DESC);

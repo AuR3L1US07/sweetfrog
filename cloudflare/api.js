@@ -55,7 +55,7 @@ export async function handleApi(request, env) {
     const origin = request.headers.get('origin');
     if (method !== 'GET' && origin && origin !== new URL(request.url).origin) fail(403, '请求来源不允许');
     const token = /^Bearer ([a-f0-9]{64})$/.exec(request.headers.get('authorization') || '')?.[1];
-    const user = token ? await first('SELECT u.id,u.public_id AS publicId,u.username,u.role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>? AND u.banned=0', await digest(token), Date.now()) : null;
+    const user = token ? await first('SELECT u.id,u.public_id AS publicId,u.username,u.role,u.title_key AS titleKey FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>? AND u.banned=0', await digest(token), Date.now()) : null;
     const requireParticipant = () => { if (!user) fail(401, '请先登录或以游客身份进入匹配'); };
     const requireUser = () => { if (!user || user.role==='guest') fail(401, '请先登录'); };
     async function rate(scope, limit) {
@@ -69,7 +69,7 @@ export async function handleApi(request, env) {
         statement('DELETE FROM sessions WHERE user_id=? AND expires_at<=?', [account.id, Date.now()]),
         statement('INSERT INTO sessions(token_hash,user_id,expires_at) VALUES(?,?,?)', [await digest(value), account.id, Date.now()+(account.role==='guest'?86400000:30*86400000)])
       ]);
-      return json({ token:value, user:{ id:account.id, publicId:account.publicId??account.public_id, username:account.username, role:account.role || 'player' } });
+      return json({ token:value, user:{ id:account.id, publicId:account.publicId??account.public_id, username:account.username, role:account.role || 'player', titleKey:account.titleKey||'apprentice' } });
     }
     const suggestions = () => all(`SELECT s.id,s.title,s.body,s.created_at AS createdAt,u.username,u.id AS userId,(SELECT count(*) FROM suggestion_votes v WHERE v.suggestion_id=s.id) AS votes,EXISTS(SELECT 1 FROM suggestion_votes v WHERE v.suggestion_id=s.id AND v.user_id=?) AS voted FROM suggestions s JOIN users u ON u.id=s.user_id ORDER BY votes DESC,s.created_at DESC,s.id DESC LIMIT 100`, user?.id || -1);
     const topics = () => all(`SELECT t.id,t.title,t.body,t.created_at AS createdAt,u.username,u.id AS userId,(SELECT count(*) FROM replies r WHERE r.topic_id=t.id) AS replyCount FROM topics t JOIN users u ON u.id=t.user_id ORDER BY t.created_at DESC,t.id DESC LIMIT 100`);
@@ -91,12 +91,22 @@ export async function handleApi(request, env) {
     }
     const matchGames=['tap','merge','flap','puzzle','aim'];
     async function finalizeMatches(){
-      await run('INSERT OR IGNORE INTO match_results(room_code,round,host_id,guest_id,winner_id,finished_at) SELECT code,round,host_id,guest_id,CASE WHEN host_score=guest_score THEN NULL WHEN host_score>guest_score THEN host_id ELSE guest_id END,starts_at+? FROM pk_rooms WHERE is_match=1 AND guest_id IS NOT NULL AND starts_at IS NOT NULL AND starts_at+?<=?',PK_DURATION_MS,PK_DURATION_MS+1200,Date.now());
+      await run(`INSERT OR IGNORE INTO match_results(room_code,round,host_id,guest_id,winner_id,finished_at,game,host_score,guest_score,host_name,guest_name)
+        SELECT r.code,r.round,r.host_id,r.guest_id,CASE WHEN r.host_score=r.guest_score THEN NULL WHEN r.host_score>r.guest_score THEN r.host_id ELSE r.guest_id END,r.starts_at+?,r.game,r.host_score,r.guest_score,h.username,g.username
+        FROM pk_rooms r JOIN users h ON h.id=r.host_id JOIN users g ON g.id=r.guest_id WHERE r.is_match=1 AND r.guest_id IS NOT NULL AND r.starts_at IS NOT NULL AND r.starts_at+?<=?`,PK_DURATION_MS,PK_DURATION_MS+1200,Date.now());
     }
     async function matchStats(playerId){
       await finalizeMatches();
       const row=await first('SELECT count(*) AS played,coalesce(sum(winner_id=?),0) AS wins,coalesce(sum(winner_id IS NOT NULL AND winner_id<>?),0) AS losses,coalesce(sum(winner_id IS NULL),0) AS draws FROM match_results WHERE host_id=? OR guest_id=?',playerId,playerId,playerId,playerId);
       return {...row,winRate:row.played?Math.round(row.wins/row.played*100):0};
+    }
+    async function unlockedTitles(playerId){
+      await finalizeMatches();
+      const wins=(await first('SELECT count(*) AS n FROM match_results WHERE winner_id=?',playerId)).n;
+      const played=await all('SELECT winner_id AS winnerId FROM match_results WHERE host_id=? OR guest_id=? ORDER BY finished_at,room_code,round',playerId,playerId);
+      let streak=0,threeWins=false;for(const result of played){streak=result.winnerId===playerId?streak+1:0;if(streak>=3)threeWins=true;}
+      const aim=(await first('SELECT aim_mastered AS mastered FROM users WHERE id=?',playerId))?.mastered;
+      return {apprentice:true,first_win:wins>0,three_wins:threeWins,sharp_eye:Boolean(aim)};
     }
     async function presenceState(){
       const cutoff=Date.now()-70000,queueCutoff=Date.now()-16000;
@@ -115,8 +125,8 @@ export async function handleApi(request, env) {
       return {total:guests+registered,guests,registered,players,remaining:Math.max(0,guests+registered-players.length)};
     }
     async function queueState(){
-      const row=await first('SELECT game,mode,status,room_code FROM match_queue WHERE user_id=?',user.id);
-      return row?{game:row.game,mode:row.mode,status:row.status,roomCode:row.room_code}:null;
+      const row=await first('SELECT game,mode,status,room_code,joined_at AS joinedAt FROM match_queue WHERE user_id=?',user.id);
+      return row?{game:row.game,mode:row.mode,status:row.status,roomCode:row.room_code,joinedAt:row.joinedAt}:null;
     }
     async function findMatch(){
       const now=Date.now();
@@ -179,6 +189,7 @@ export async function handleApi(request, env) {
       const [low,high]=friendPair(targetId),now=Date.now();
       const result=await run(`INSERT INTO friend_links(user_low,user_high,requester_id,status,updated_at) VALUES(?,?,?,'pending',?) ON CONFLICT(user_low,user_high) DO UPDATE SET requester_id=excluded.requester_id,status='pending',updated_at=excluded.updated_at WHERE friend_links.status='declined' AND friend_links.updated_at<?`,low,high,user.id,now,now-86400000);
       if(!result.meta.changes)fail(409,'已有好友关系或申请；被拒绝后需等待一天再申请');
+      await run("INSERT INTO notifications(user_id,actor_id,kind,target_id,created_at) VALUES(?,?,'friend',?,?)",targetId,user.id,user.id,now);
       return json({ok:true},201);
     }
     const requestDecision=/^\/api\/friends\/requests\/(\d+)$/.exec(path);
@@ -255,6 +266,7 @@ export async function handleApi(request, env) {
       return json({ok:true,roomCode:invite.room_code});
     }
     if(path==='/api/guest/session'&&method==='POST'){
+      await finalizeMatches();
       if(user?.role==='guest')return json({token,user});
       if(user)fail(409,'你已经登录玩家账号');
       await rate(`guest-session:${request.headers.get('CF-Connecting-IP')||'local'}`,120);
@@ -284,7 +296,7 @@ export async function handleApi(request, env) {
         const waiting=mode==='random'?await first("SELECT game FROM match_queue WHERE user_id<>? AND status='waiting' AND last_seen>=? ORDER BY joined_at,user_id LIMIT 1",user.id,now-16000):null;
         const game=mode==='random'?(waiting?.game||matchGames[crypto.getRandomValues(new Uint32Array(1))[0]%matchGames.length]):requested;
         await run('DELETE FROM match_queue WHERE last_seen<?',now-86400000);
-        await run("INSERT INTO match_queue(user_id,game,mode,status,joined_at,last_seen,room_code) VALUES(?,?,?,'waiting',?,?,NULL) ON CONFLICT(user_id) DO UPDATE SET game=excluded.game,mode=excluded.mode,status='waiting',joined_at=excluded.joined_at,last_seen=excluded.last_seen,room_code=NULL",user.id,game,mode,now,now);
+        await run("INSERT INTO match_queue(user_id,game,mode,status,joined_at,last_seen,room_code) VALUES(?,?,?,'waiting',?,?,NULL) ON CONFLICT(user_id) DO UPDATE SET game=excluded.game,mode=excluded.mode,status='waiting',joined_at=CASE WHEN match_queue.status='waiting' THEN match_queue.joined_at ELSE excluded.joined_at END,last_seen=excluded.last_seen,room_code=NULL",user.id,game,mode,now,now);
         return json({queue:await findMatch()});
       }
       if(method==='GET'){
@@ -344,9 +356,38 @@ export async function handleApi(request, env) {
     if (method === 'POST' && path === '/api/logout') { if (token) await run('DELETE FROM sessions WHERE token_hash=?',await digest(token)); return json({ok:true}); }
     if (path === '/api/profile') {
       requireUser();
-      if (method==='GET') return json({profile:await first('SELECT id,public_id AS publicId,username,role,created_at AS createdAt FROM users WHERE id=?',user.id)});
+      if (method==='GET') return json({profile:await first('SELECT id,public_id AS publicId,username,role,title_key AS titleKey,created_at AS createdAt FROM users WHERE id=?',user.id)});
     }
     if(path==='/api/match/stats'&&method==='GET'){requireUser();return json({stats:await matchStats(user.id)});}
+    if(path==='/api/match/history'&&method==='GET'){
+      requireUser();await finalizeMatches();
+      const items=await all(`SELECT r.room_code AS roomCode,r.round,r.game,r.finished_at AS finishedAt,r.winner_id AS winnerId,
+        CASE WHEN r.host_id=? THEN r.host_score ELSE r.guest_score END AS ownScore,
+        CASE WHEN r.host_id=? THEN r.guest_score ELSE r.host_score END AS opponentScore,
+        CASE WHEN r.host_id=? THEN r.guest_id ELSE r.host_id END AS opponentId,
+        CASE WHEN r.host_id=? THEN coalesce(g.username,r.guest_name,'游客') ELSE coalesce(h.username,r.host_name,'游客') END AS opponentName
+        FROM match_results r LEFT JOIN users h ON h.id=r.host_id LEFT JOIN users g ON g.id=r.guest_id
+        WHERE r.host_id=? OR r.guest_id=? ORDER BY r.finished_at DESC,r.room_code DESC,r.round DESC LIMIT 20`,user.id,user.id,user.id,user.id,user.id,user.id);
+      return json({items:items.map(item=>({...item,result:item.winnerId===null?'draw':item.winnerId===user.id?'win':'loss'}))});
+    }
+    if(path==='/api/profile/titles'){
+      requireUser();
+      if(method==='GET')return json({unlocked:await unlockedTitles(user.id),selected:user.titleKey});
+      if(method==='POST'){
+        const key=(await body(request)).key;if(!['apprentice','first_win','three_wins','sharp_eye'].includes(key))fail(400,'称号无效');
+        if(!(await unlockedTitles(user.id))[key])fail(403,'尚未获得这个称号');
+        await run('UPDATE users SET title_key=? WHERE id=?',key,user.id);return json({ok:true,titleKey:key});
+      }
+    }
+    if(path==='/api/notifications'){
+      requireUser();
+      if(method==='GET'){
+        const unread=(await first('SELECT count(*) AS n FROM notifications WHERE user_id=? AND read_at IS NULL',user.id)).n;
+        const items=await all('SELECT n.id,n.kind,n.target_id AS targetId,n.created_at AS createdAt,n.read_at AS readAt,coalesce(u.username,\'一位玩家\') AS actorName FROM notifications n LEFT JOIN users u ON u.id=n.actor_id WHERE n.user_id=? ORDER BY n.created_at DESC,n.id DESC LIMIT 50',user.id);
+        return json({items,unread});
+      }
+      if(method==='POST'){await run('UPDATE notifications SET read_at=? WHERE user_id=? AND read_at IS NULL',Date.now(),user.id);return json({ok:true});}
+    }
     if (method==='POST' && path==='/api/profile/avatar') {
       requireUser(); await rate(`avatar:${user.id}`,12);
       const data=await body(request,90000),avatar=data.avatarData;
@@ -498,6 +539,7 @@ export async function handleApi(request, env) {
       requireUser();
       if (!await first('SELECT id FROM suggestions WHERE id=?',Number(vote[1]))) fail(404,'提议不存在');
       const result=await run('INSERT OR IGNORE INTO suggestion_votes(suggestion_id,user_id) VALUES(?,?)',Number(vote[1]),user.id);
+      if(result.meta.changes){const owner=await first('SELECT user_id AS id FROM suggestions WHERE id=?',Number(vote[1]));if(owner?.id!==user.id)await run("INSERT INTO notifications(user_id,actor_id,kind,target_id,created_at) VALUES(?,?,'vote',?,?)",owner.id,user.id,Number(vote[1]),Date.now());}
       return json({ok:true,added:result.meta.changes===1});
     }
     const replies=/^\/api\/topics\/(\d+)\/replies$/.exec(path);
@@ -508,15 +550,17 @@ export async function handleApi(request, env) {
       const content=text((await body(request)).body,1000);
       if (!content || content.length>1000) fail(400,'回复长度不合适');
       await run('INSERT INTO replies(topic_id,user_id,body) VALUES(?,?,?)',Number(replies[1]),user.id,content);
+      const owner=await first('SELECT user_id AS id FROM topics WHERE id=?',Number(replies[1]));if(owner?.id!==user.id)await run("INSERT INTO notifications(user_id,actor_id,kind,target_id,created_at) VALUES(?,?,'reply',?,?)",owner.id,user.id,Number(replies[1]),Date.now());
       return json({ok:true},201);
     }
     const leader=/^\/api\/leaderboards\/(match|tap|merge|flap|puzzle|aim)$/.exec(path);
     if (leader && method==='GET') return json(await rank(leader[1]));
     if (leader && method==='POST') {
       if(leader[1]==='match')fail(405,'匹配胜场由服务器在对局结束后记录');
-      requireUser(); const score=(await body(request)).score;
+      requireUser(); const data=await body(request),score=data.score;
       if (!Number.isSafeInteger(score) || score<0 || score>10000000) fail(400,'成绩无效');
       await run(`INSERT INTO scores(user_id,game,score) VALUES(?,?,?) ON CONFLICT(user_id,game) DO UPDATE SET score=excluded.score,updated_at=CURRENT_TIMESTAMP WHERE excluded.score>scores.score`,user.id,leader[1],score);
+      if(leader[1]==='aim'&&score>0&&Number.isSafeInteger(data.hits)&&Number.isSafeInteger(data.shots)&&data.shots>=10&&data.shots<=10000&&data.hits>=0&&data.hits<=data.shots&&Math.round(data.hits/data.shots*100)>=90)await run('UPDATE users SET aim_mastered=1 WHERE id=?',user.id);
       return json({ok:true,self:(await rank(leader[1])).self});
     }
     if (path.startsWith('/api/admin/')) {
@@ -541,8 +585,8 @@ export async function handleApi(request, env) {
       const deletion=/^\/api\/admin\/(suggestions|topics|replies)\/(\d+)$/.exec(path);
       if (deletion && method==='DELETE') {
         const table=deletion[1], id=Number(deletion[2]), statements=[];
-        if(table==='suggestions') statements.push(statement('DELETE FROM suggestion_votes WHERE suggestion_id=?',[id]));
-        if(table==='topics') statements.push(statement('DELETE FROM replies WHERE topic_id=?',[id]));
+        if(table==='suggestions'){statements.push(statement('DELETE FROM notifications WHERE kind=\'vote\' AND target_id=?',[id]));statements.push(statement('DELETE FROM suggestion_votes WHERE suggestion_id=?',[id]));}
+        if(table==='topics'){statements.push(statement('DELETE FROM notifications WHERE kind=\'reply\' AND target_id=?',[id]));statements.push(statement('DELETE FROM replies WHERE topic_id=?',[id]));}
         statements.push(statement(`DELETE FROM ${table} WHERE id=?`,[id]));
         await db.batch(statements); return json({ok:true});
       }

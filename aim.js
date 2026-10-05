@@ -82,7 +82,7 @@ export function createAimGame({ stage, tileCanvas, canPlay, setScore, extra, bee
         targetButton.hidden = true; decoys.forEach(d => d.element.remove()); decoys = []; controls.forEach(e => e.disabled = false);
         const label = mode === 'moving' ? '移动追点' : '静态定位';
         const reaction = summary.reaction === null ? '—' : summary.reaction + ' ms';
-        finish('训练完成，手感上线', `${label} · ${duration} 秒\n命中 ${hits} / ${shots} · 命中率 ${summary.accuracy}%\n平均用时 ${reaction} · 最佳连中 ${bestCombo}\n误击青蛙 ${frogHits} 次（每次扣 100 分，最低 0 分）`);
+        finish('训练完成，手感上线', `${label} · ${duration} 秒\n命中 ${hits} / ${shots} · 命中率 ${summary.accuracy}%\n平均用时 ${reaction} · 最佳连中 ${bestCombo}\n误击青蛙 ${frogHits} 次（每次扣 100 分，最低 0 分）`,{hits,shots});
       }
     },
     destroy() { resize.disconnect(); decoys.forEach(d => d.element.remove()); controls.forEach(e => e.disabled = false); effects.forEach(item => item.element.remove()); }

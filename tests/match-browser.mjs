@@ -66,7 +66,13 @@ try{
   await hostPage.locator('[data-match-game="tap"]').click();
   await hostPage.getByRole('button',{name:'匹配「逮住大青蛙」对手 →'}).click();
   await hostPage.locator('#match-searching').waitFor({state:'visible'});
-  await guestPage.waitForFunction(()=>Number(document.querySelector('[data-match-game="tap"] .match-mode-waiting strong').textContent)>=1,{timeout:10000});
+  await hostPage.getByText('已等待', {exact:false}).waitFor();
+  await hostPage.evaluate(()=>{window.__realNow=Date.now;Date.now=()=>window.__realNow()+21000;});
+  await hostPage.getByRole('button',{name:'等得有点久？试试随机匹配 →'}).waitFor({state:'visible',timeout:8000});
+  await hostPage.getByRole('button',{name:'等得有点久？试试随机匹配 →'}).click();
+  await hostPage.evaluate(()=>{Date.now=window.__realNow;});
+  await hostPage.getByText('随机匹配中', {exact:false}).waitFor();
+  await guestPage.waitForFunction(()=>[...document.querySelectorAll('.match-mode:not(.match-mode-random) .match-mode-waiting strong')].some(node=>Number(node.textContent)>=1));
   await guestPage.screenshot({path:'tests/match-mobile-preview.png',fullPage:true});
   await guestPage.locator('[data-match-game="tap"]').click();
   await guestPage.getByRole('button',{name:'匹配「逮住大青蛙」对手 →'}).click();
@@ -89,7 +95,7 @@ try{
   assert.match(tourist.username,/^游客\d{5}$/);assert.equal(tourist.role,'guest');
   await touristPage.getByRole('button',{name:'开始随机匹配 →'}).click();
   await touristPage.locator('#match-searching').waitFor({state:'visible'});
-  await hostPage.goto(base+'/#match');await hostPage.getByRole('button',{name:'匹配「逮住大青蛙」对手 →'}).click();
+  await hostPage.goto(base+'/#match');await hostPage.locator('[data-match-game="tap"]').click();await hostPage.getByRole('button',{name:'匹配「逮住大青蛙」对手 →'}).click();
   await hostPage.locator('#match-found').waitFor({state:'visible',timeout:10000});
   await hostPage.waitForFunction(name=>document.querySelector('.match-duel-opponent strong')?.textContent===name,tourist.username);
   await touristPage.waitForURL('**/#pk/*',{timeout:10000});

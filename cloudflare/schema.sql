@@ -1,5 +1,5 @@
 PRAGMA foreign_keys=ON;
-CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, public_id INTEGER NOT NULL UNIQUE CHECK(public_id BETWEEN 10000 AND 99999), username TEXT NOT NULL UNIQUE COLLATE NOCASE, password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'player', banned INTEGER NOT NULL DEFAULT 0, avatar_data TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, public_id INTEGER NOT NULL UNIQUE CHECK(public_id BETWEEN 10000 AND 99999), username TEXT NOT NULL UNIQUE COLLATE NOCASE, password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'player', banned INTEGER NOT NULL DEFAULT 0, avatar_data TEXT, title_key TEXT NOT NULL DEFAULT 'apprentice', aim_mastered INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS suggestions(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), title TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS suggestion_votes(suggestion_id INTEGER NOT NULL REFERENCES suggestions(id), user_id INTEGER NOT NULL REFERENCES users(id), PRIMARY KEY(suggestion_id,user_id));
@@ -13,10 +13,12 @@ CREATE TABLE IF NOT EXISTS online_presence(client_key TEXT PRIMARY KEY, user_id 
 CREATE INDEX IF NOT EXISTS idx_online_presence_seen ON online_presence(last_seen);
 CREATE TABLE IF NOT EXISTS match_queue(user_id INTEGER PRIMARY KEY REFERENCES users(id), game TEXT NOT NULL, mode TEXT NOT NULL DEFAULT 'fixed', status TEXT NOT NULL DEFAULT 'waiting', joined_at INTEGER NOT NULL, last_seen INTEGER NOT NULL, room_code TEXT);
 CREATE INDEX IF NOT EXISTS idx_match_queue_find ON match_queue(game,status,joined_at);
-CREATE TABLE IF NOT EXISTS match_results(room_code TEXT NOT NULL, round INTEGER NOT NULL, host_id INTEGER NOT NULL, guest_id INTEGER NOT NULL, winner_id INTEGER, finished_at INTEGER NOT NULL, PRIMARY KEY(room_code,round));
+CREATE TABLE IF NOT EXISTS match_results(room_code TEXT NOT NULL, round INTEGER NOT NULL, host_id INTEGER NOT NULL, guest_id INTEGER NOT NULL, winner_id INTEGER, finished_at INTEGER NOT NULL, game TEXT, host_score INTEGER, guest_score INTEGER, host_name TEXT, guest_name TEXT, PRIMARY KEY(room_code,round));
 CREATE INDEX IF NOT EXISTS idx_match_results_host ON match_results(host_id);
 CREATE INDEX IF NOT EXISTS idx_match_results_guest ON match_results(guest_id);
 CREATE INDEX IF NOT EXISTS idx_match_results_winner ON match_results(winner_id);
+CREATE TABLE IF NOT EXISTS notifications(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), actor_id INTEGER NOT NULL REFERENCES users(id), kind TEXT NOT NULL CHECK(kind IN ('reply','vote','friend')), target_id INTEGER NOT NULL, created_at INTEGER NOT NULL, read_at INTEGER);
+CREATE INDEX IF NOT EXISTS idx_notifications_inbox ON notifications(user_id,read_at,created_at DESC);
 CREATE TABLE IF NOT EXISTS friend_links(user_low INTEGER NOT NULL REFERENCES users(id), user_high INTEGER NOT NULL REFERENCES users(id), requester_id INTEGER NOT NULL REFERENCES users(id), status TEXT NOT NULL CHECK(status IN ('pending','accepted','declined')), updated_at INTEGER NOT NULL, PRIMARY KEY(user_low,user_high));
 CREATE INDEX IF NOT EXISTS idx_friend_links_high ON friend_links(user_high,status);
 CREATE TABLE IF NOT EXISTS friend_messages(id INTEGER PRIMARY KEY, sender_id INTEGER NOT NULL REFERENCES users(id), recipient_id INTEGER NOT NULL REFERENCES users(id), body TEXT NOT NULL, created_at INTEGER NOT NULL, read_at INTEGER);

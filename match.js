@@ -63,6 +63,10 @@ function showSearching(){
   panel.hidden=false;content.querySelector('#match-modes').hidden=true;content.querySelector('#match-start').hidden=true;
   panel.querySelector('.match-search-title').textContent=queue.mode==='random'?`随机匹配中 · 当前候选「${names[queue.game]}」`:`正在寻找「${names[queue.game]}」对手`;
   panel.querySelector('.match-search-sub').textContent=queue.mode==='random'?'有其他模式的玩家加入时，也可能切换到他们的游戏。':'找到玩家后会自动进入同一场对局。';
+  const elapsed=Math.max(0,Math.floor((Date.now()-(queue.joinedAt||Date.now()))/1000));
+  panel.querySelector('.match-wait-time').textContent=`已等待 ${elapsed} 秒`;
+  panel.querySelector('.match-wait-estimate').textContent=(latestCounts?.online?.[queue.game]||0)>1?'预计可能较快，但需其他在线玩家发起匹配。':'暂无可用对手，预计等待时间暂不确定。';
+  panel.querySelector('.match-switch-random').hidden=queue.mode==='random'||elapsed<20;
   page.querySelector('#match-found').hidden=true;
   if(wasHidden)requestAnimationFrame(()=>panel.scrollIntoView({block:'center',behavior:'instant'}));
 }
@@ -127,7 +131,8 @@ function render(){
     button.addEventListener('click',()=>choose(game));modes.append(button);
   }
   const searching=make('section','match-searching');searching.id='match-searching';searching.hidden=true;
-  searching.innerHTML=`<div class="match-orbit"><span>${iconSvg('frog')}</span><i></i><i></i></div><h2 class="match-search-title"></h2><p class="match-search-sub"></p>`;
+  searching.innerHTML=`<div class="match-orbit"><span>${iconSvg('frog')}</span><i></i><i></i></div><h2 class="match-search-title"></h2><p class="match-search-sub"></p><div class="match-wait-status"><strong class="match-wait-time">已等待 0 秒</strong><span class="match-wait-estimate">正在查看等待情况…</span></div>`;
+  const switchButton=make('button','match-switch-random','等得有点久？试试随机匹配 →');switchButton.type='button';switchButton.hidden=true;switchButton.addEventListener('click',switchToRandom);searching.append(switchButton);
   const cancelButton=make('button','match-cancel','取消匹配');cancelButton.type='button';cancelButton.addEventListener('click',cancel);searching.append(cancelButton);
   const found=make('section','match-found');found.id='match-found';found.hidden=true;
   found.innerHTML=`<div class="match-found-rays" aria-hidden="true"></div><div class="match-found-icon">${iconSvg('match')}</div><h2>匹配成功！</h2><strong class="match-found-game"></strong><div class="match-duel"><span class="match-duel-self"><img alt="" src="./assets/default-frog-avatar.svg"><strong>你</strong></span><b>VS</b><span class="match-duel-opponent"><img alt="" src="./assets/default-frog-avatar.svg"><strong>新对手</strong></span></div><p class="match-found-copy"></p>`;
@@ -166,6 +171,12 @@ function renderOnlineShell(){
   const list=make('div','online-player-list');list.id='online-player-list';list.setAttribute('aria-live','polite');
   const status=make('p','online-status','正在加载在线名单…');status.id='online-status';status.setAttribute('role','status');
   onlineContent.append(head,summary,title,note,list,status);
+}
+async function switchToRandom(){
+  if(!queue||queue.mode==='random'||requesting)return;requesting=true;const id=routeId,version=++queueVersion;
+  try{const data=await api('match/queue',{method:'POST',body:{game:'random'}});if(id!==routeId||version!==queueVersion)return;selected='random';await handleQueue(data.queue,id,version);setMessage('已切换为随机匹配。');}
+  catch(error){setMessage(error.message);try{await handleQueue((await api('match/queue')).queue,id,version);}catch{}}
+  finally{requesting=false;}
 }
 function showOnlinePlayers(data){
   onlineContent.querySelector('#online-page-total').textContent=String(data.total);
