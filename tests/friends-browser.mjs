@@ -24,6 +24,17 @@ try{
   await hostPage.addInitScript(value=>localStorage.setItem('sweetfrog-session',value),host.token);
   await guestPage.addInitScript(value=>localStorage.setItem('sweetfrog-session',value),guest.token);
   await hostPage.goto(base+'/#friends');await guestPage.goto(base+'/#friends');
+  await hostPage.waitForFunction(()=>document.querySelector('#account-chip .account-chip-name')?.textContent?.startsWith('friendhost'));
+  assert.equal(await hostPage.locator('#account-chip small').count(),0);
+  for(const section of ['tap','suggestions','discussion','leaderboard','friends']){
+    await hostPage.evaluate(section=>location.hash=section,section);
+    await hostPage.waitForFunction(section=>{
+      const current=document.querySelectorAll('.site-header nav a.active');
+      return current.length===(section==='tap'?0:1)&&
+        (section==='tap'||current[0].getAttribute('href')==='#'+section)&&
+        (section==='tap'||document.querySelector('#lobby').hidden&&document.querySelector('#game-screen').hidden);
+    },section);
+  }
   await guestPage.locator('#friend-query').fill(host.user.username);
   await guestPage.getByRole('button',{name:'搜索玩家'}).click();
   await guestPage.getByText(host.user.username).waitFor();
@@ -34,16 +45,23 @@ try{
   await hostPage.getByRole('button',{name:'接受',exact:true}).click();
   await hostPage.getByRole('link',{name:'发私信'}).waitFor();
   await guestPage.reload();await guestPage.getByRole('link',{name:'发私信'}).waitFor();
+  await guestPage.evaluate(()=>window.__savedFriendAvatar=document.querySelector('#friends-content .friend-avatar'));
+  await guestPage.getByRole('button',{name:'刷新好友与邀请'}).click();
+  await guestPage.getByText('好友与邀请已更新。').waitFor();
+  assert.equal(await guestPage.evaluate(()=>window.__savedFriendAvatar===document.querySelector('#friends-content .friend-avatar')),true);
   await guestPage.getByRole('link',{name:'发私信'}).click();
   assert.equal(new URL(guestPage.url()).hash,`#friends/${host.user.publicId}`);
   await guestPage.locator('#friend-message-body').fill('今晚一起玩青蛙定位练习？');
-  await guestPage.getByRole('button',{name:'发送',exact:true}).click();
+  await guestPage.locator('#friend-message-body').press('Enter');
   await guestPage.getByText('今晚一起玩青蛙定位练习？').waitFor();
   await hostPage.waitForFunction(()=>!document.querySelector('#friends-badge')?.hidden,{timeout:15000});
   await hostPage.getByRole('link',{name:'发私信'}).click();
   await hostPage.getByText('今晚一起玩青蛙定位练习？').waitFor();
   await hostPage.locator('#friend-message-body').fill('来吧！');
-  await hostPage.getByRole('button',{name:'发送',exact:true}).click();
+  await hostPage.locator('#friend-message-body').press('Shift+Enter');
+  assert.ok((await hostPage.locator('#friend-message-body').inputValue()).includes('\n'));
+  await hostPage.locator('#friend-message-body').fill('来吧！');
+  await hostPage.locator('#friend-message-body').press('Enter');
   await guestPage.getByText('来吧！').waitFor({timeout:10000});
   await guestPage.getByRole('button',{name:'展开功能菜单'}).click();
   await guestPage.locator('.site-header.nav-open').waitFor();

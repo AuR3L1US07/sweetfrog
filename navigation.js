@@ -31,12 +31,21 @@ function sync(){
   syncing=false;
 }
 const observer=new MutationObserver(()=>sync());observer.observe(nav,{childList:true,subtree:true});sync();
+function syncActive(){
+  const section=location.hash.slice(1).split('/')[0]||'games';
+  for(const link of nav.querySelectorAll('a')){
+    const selected=link.getAttribute('href')==='#'+section;
+    link.classList.toggle('active',selected);
+    if(selected)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');
+  }
+}
+const activeObserver=new MutationObserver(syncActive);activeObserver.observe(nav,{childList:true,subtree:true,attributes:true,attributeFilter:['class']});syncActive();
 function setOpen(open){const expanded=Boolean(open);header.classList.toggle('nav-open',expanded);menu.setAttribute('aria-expanded',String(expanded));menu.setAttribute('aria-label',expanded?'关闭功能菜单':'展开功能菜单');renderMenu(expanded);backdrop.hidden=!expanded;document.body.classList.toggle('nav-drawer-open',expanded);if(expanded)close.focus();}
 menu.addEventListener('click',()=>setOpen(!header.classList.contains('nav-open')));
 close.addEventListener('click',()=>{setOpen(false);menu.focus();});
 backdrop.addEventListener('click',()=>{setOpen(false);menu.focus();});
 nav.addEventListener('click',event=>{if(event.target.closest('a'))setOpen(false);});
-window.addEventListener('hashchange',()=>setOpen(false));
+window.addEventListener('hashchange',()=>{setOpen(false);syncActive();});
 window.addEventListener('keydown',event=>{
   if(!header.classList.contains('nav-open'))return;
   if(event.key==='Escape'){setOpen(false);menu.focus();return;}

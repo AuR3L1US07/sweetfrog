@@ -69,7 +69,7 @@ async function openGame(key) {
  await ready;if(active!==key)return;$('#start-button').disabled=false;showOverlay('准备好了吗？',d.rules,'开始游戏 →',start);
 }
 function lobby() { cleanup();pkMode=null;active=null;$('#lobby').hidden=false;$('#game-screen').classList.remove('pk-mode');$('#game-screen').hidden=true;$('#back-button').hidden=false;$('#restart-button').hidden=false;updateRecords(); }
-function route() {const key=location.hash.slice(1);if(descriptions[key])openGame(key);else lobby();}
+function route() {const key=location.hash.slice(1);if(descriptions[key])openGame(key);else if(!key||key==='games')lobby();else{cleanup();active=null;$('#lobby').hidden=true;$('#game-screen').hidden=true;}}
 window.addEventListener('hashchange',route);document.querySelectorAll('[data-game]').forEach(b=>b.onclick=()=>{location.hash=b.dataset.game;});$('#back-button').onclick=()=>{location.hash='games';};$('#restart-button').onclick=()=>{if(active)openGame(active);};
 function start() { cleanup();pkRandomState=pkMode?(pkMode.seed||1):0;setScore(0);overlay.hidden=true;running=true;paused=false;session=({tap:createTap,merge:createMerge,flap:createFlap,puzzle:createPuzzle,aim:()=>createAimGame({stage,tileCanvas,canPlay:()=>running&&!paused,setScore,extra,beep,finish,random:gameRandom,skipCountdown:Boolean(pkMode)})})[active]();lastTime=performance.now();raf=requestAnimationFrame(tick);beep(); }
 function tick(now) {if(!running||paused)return;if(pkMode&&Date.now()>=pkMode.localEndsAt){finish('时间到！','30 秒 PK 已结束。');return;}const dt=Math.min((now-lastTime)/1000,.05);lastTime=now;session?.update?.(dt);session?.draw?.();if(running&&!paused)raf=requestAnimationFrame(tick);}

@@ -11,6 +11,7 @@ const badge=document.createElement('span');badge.className='nav-badge';badge.id=
 const make=(tag,className,text)=>{const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node;};
 const token=()=>{try{return localStorage.getItem('sweetfrog-session')||'';}catch{return '';}};
 let currentRoute=0,chatTimer=0,lastMessageId=0,shownMessages=new Set(),summaryTimer=0,summaryBusy=false;
+let refreshDashboard=()=>{};
 async function api(path,options={}){
   const response=await fetch('/api/'+path,{method:options.method||'GET',headers:{'Content-Type':'application/json',...(token()?{Authorization:`Bearer ${token()}`}:{})},body:options.body===undefined?undefined:JSON.stringify(options.body)});
   const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(data.error||'连接失败，请稍后再试');return data;
@@ -36,8 +37,8 @@ function renderPeople(target,people,mode){
     const card=make('div','friend-row');card.append(avatar(person.id));
     const copy=make('div','friend-row-copy');copy.append(make('strong','',person.username),make('small','',`ID ${person.publicId}${mode==='friend'?(person.online?' · 在线':' · 暂未在线'):''}`));card.append(copy);
     if(mode==='friend'){const link=make('a','friend-action','发私信');link.href=`#friends/${person.publicId}`;card.append(link);if(person.unread)card.append(make('span','friend-unread',String(person.unread)));}
-    else if(mode==='incoming'){card.append(action('接受',button=>mutate(button,`friends/requests/${person.id}`,{decision:'accept'},renderRoute)));card.append(action('拒绝',button=>mutate(button,`friends/requests/${person.id}`,{decision:'decline'},renderRoute),'friend-quiet'));}
-    else card.append(action('撤回',button=>mutate(button,`friends/requests/${person.id}`,{decision:'cancel'},renderRoute),'friend-quiet'));
+    else if(mode==='incoming'){card.append(action('接受',button=>mutate(button,`friends/requests/${person.id}`,{decision:'accept'},refreshDashboard)));card.append(action('拒绝',button=>mutate(button,`friends/requests/${person.id}`,{decision:'decline'},refreshDashboard),'friend-quiet'));}
+    else card.append(action('撤回',button=>mutate(button,`friends/requests/${person.id}`,{decision:'cancel'},refreshDashboard),'friend-quiet'));
     target.append(card);
   }
 }
@@ -47,7 +48,7 @@ function renderInvites(target,invites){
     const card=make('div','friend-row');card.append(avatar(invite.fromUser));
     const copy=make('div','friend-row-copy');copy.append(make('strong','',invite.username),make('small','',`邀请你玩 ${({tap:'逮住大青蛙',merge:'合成大青蛙',flap:'青蛙起飞',puzzle:'青蛙2048',aim:'青蛙定位练习'})[invite.game]||'好友 PK'} · 房间 ${invite.roomCode}`));card.append(copy);
     card.append(action('接受并进入',button=>mutate(button,`pk/invites/${invite.id}`,{decision:'accept'},data=>{location.hash='pk/'+data.roomCode;})));
-    card.append(action('婉拒',button=>mutate(button,`pk/invites/${invite.id}`,{decision:'decline'},renderRoute),'friend-quiet'));
+    card.append(action('婉拒',button=>mutate(button,`pk/invites/${invite.id}`,{decision:'decline'},refreshDashboard),'friend-quiet'));
     target.append(card);
   }
 }
@@ -70,7 +71,7 @@ async function search(form){
 }
 async function renderDashboard(id){
   content.replaceChildren(heading('好友与私信','搜索昵称或 ID，和朋友保持联系。'));
-  content.append(action('刷新好友与邀请',()=>renderRoute(),'friend-quiet friends-refresh'));
+  const refresh=action('刷新好友与邀请',()=>refreshDashboard(true),'friend-quiet friends-refresh');content.append(refresh);
   const searchPanel=make('section','friends-panel');searchPanel.append(make('h2','','寻找好友'));
   const form=make('form','friend-search');form.innerHTML='<label for="friend-query">玩家昵称或 ID</label><div><input id="friend-query" name="query" maxlength="20" autocomplete="off" placeholder="例如：大青蛙 或 123"><button type="submit">搜索玩家</button></div>';
   form.querySelector('input').placeholder='例如：大青蛙 或 58321';form.addEventListener('submit',event=>{event.preventDefault();search(form);});searchPanel.append(form);
@@ -80,11 +81,23 @@ async function renderDashboard(id){
   const outgoingPanel=make('section','friends-panel');outgoingPanel.append(make('h2','','发出的申请'));const outgoing=make('div','friend-list');outgoingPanel.append(outgoing);content.append(outgoingPanel);
   const friendsPanel=make('section','friends-panel');friendsPanel.append(make('h2','','我的好友'));const friendsList=make('div','friend-list');friendsPanel.append(friendsList);content.append(friendsPanel);
   const status=make('p','friends-status','');status.id='friends-status';status.setAttribute('role','status');content.append(status);
-  try{
-    const [friends,invites]=await Promise.all([api('friends'),api('pk/invites')]);if(id!==currentRoute)return;
-    renderInvites(inviteList,invites.incoming);renderPeople(incoming,friends.incoming,'incoming');renderPeople(outgoing,friends.outgoing,'outgoing');renderPeople(friendsList,friends.friends,'friend');
-    pendingPanel.hidden=!friends.incoming.length;outgoingPanel.hidden=!friends.outgoing.length;setBadge(friends.unread+friends.incoming.length+invites.incoming.length);
-  }catch(error){if(id===currentRoute)status.textContent=error.message;}
+  const signatures=new Map();
+  function updateList(key,target,items,draw){const signature=JSON.stringify(items);if(signatures.get(key)===signature)return;signatures.set(key,signature);draw(target,items);}
+  refreshDashboard=async(manual=false)=>{
+    refresh.disabled=true;if(manual)status.textContent='正在刷新…';
+    try{
+      const [friends,invites]=await Promise.all([api('friends'),api('pk/invites')]);if(id!==currentRoute)return;
+      updateList('invites',inviteList,invites.incoming,renderInvites);
+      updateList('incoming',incoming,friends.incoming,(target,items)=>renderPeople(target,items,'incoming'));
+      updateList('outgoing',outgoing,friends.outgoing,(target,items)=>renderPeople(target,items,'outgoing'));
+      updateList('friends',friendsList,friends.friends,(target,items)=>renderPeople(target,items,'friend'));
+      pendingPanel.hidden=!friends.incoming.length;outgoingPanel.hidden=!friends.outgoing.length;
+      setBadge(friends.unread+friends.incoming.length+invites.incoming.length);
+      status.textContent=manual?'好友与邀请已更新。':'';
+    }catch(error){if(id===currentRoute)status.textContent=error.message;}
+    finally{if(id===currentRoute)refresh.disabled=false;}
+  };
+  await refreshDashboard();
 }
 function messageNode(message,selfId){
   const own=message.senderId===selfId,bubble=make('div','friend-message'+(own?' is-own':''));bubble.dataset.messageId=String(message.id);
@@ -112,6 +125,8 @@ async function renderChat(peerId,id){
   const label=make('div','');label.append(make('h1','',peer.username),make('span','',`ID ${peer.publicId} · ${peer.online?'在线':'暂未在线'}`));head.append(label);panel.append(head);
   const messages=make('div','friend-messages');messages.id='friend-messages';messages.setAttribute('aria-label',`与${peer.username}的私信`);panel.append(messages);
   const form=make('form','friend-compose');form.innerHTML='<label for="friend-message-body">发送私信</label><div><textarea id="friend-message-body" name="body" maxlength="1000" rows="2" placeholder="写点什么…"></textarea><button type="submit">发送</button></div><p role="status"></p>';
+  form.querySelector('label').textContent='发送私信 · 回车发送，Shift + 回车换行';
+  form.querySelector('textarea').addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing&&event.keyCode!==229){event.preventDefault();form.requestSubmit();}});
   form.addEventListener('submit',async event=>{event.preventDefault();const body=form.elements.body.value.trim(),button=form.querySelector('button'),status=form.querySelector('[role=status]');if(!body)return;button.disabled=true;try{const data=await api(`friends/${peerId}/messages`,{method:'POST',body:{body}});appendMessages([data.message],friends.self.id);form.reset();status.textContent='';form.elements.body.focus();}catch(error){status.textContent=error.message;}finally{button.disabled=false;}});
   panel.append(form);content.append(panel);shownMessages=new Set();lastMessageId=0;
   try{const data=await api(`friends/${peerId}/messages`);if(id!==currentRoute)return;appendMessages(data.messages,friends.self.id);messages.scrollTop=messages.scrollHeight;refreshSummary();}
