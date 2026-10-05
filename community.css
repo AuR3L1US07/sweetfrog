@@ -39,11 +39,12 @@
 .profile-settings-tab:hover:not([aria-selected="true"]){color:#1a795d;background:#e1f1e7}
 .profile-settings-tab:focus-visible{outline:3px solid #238776;outline-offset:3px}
 .profile-grid{display:block;max-width:none}
-.profile-panel{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 16px;max-width:none;margin:0;padding:0;border:0;border-radius:0;background:none;box-shadow:none}
+.profile-panel{display:grid;grid-template-columns:minmax(0,1fr);gap:0;max-width:none;margin:0;padding:0;border:0;border-radius:0;background:none;box-shadow:none}
 .profile-panel[hidden]{display:none}
 .profile-panel h2,.profile-panel>button,.profile-panel>[role="status"]{grid-column:1/-1}
 .profile-panel h2{margin:0 0 15px;font-size:19px}
 .profile-panel label{margin-bottom:16px}
+.profile-panel label{width:min(100%,560px)}
 .profile-panel input{margin-top:6px}
 .profile-panel button{justify-self:start;min-width:112px}
 .profile-panel [role="status"]{margin:10px 0 0}

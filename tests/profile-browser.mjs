@@ -23,11 +23,16 @@ try{
     const page=await browser.newPage({viewport});const errors=[];page.on('pageerror',error=>errors.push(error.message));
     await page.addInitScript(value=>localStorage.setItem('sweetfrog-session',value),member.token);
     await page.goto(base+'/#profile');await page.getByRole('heading',{name:'账号与安全'}).waitFor();
+    await page.locator('.profile-facts dd').nth(2).waitFor();
+    assert.equal(await page.locator('.profile-facts dt').allTextContents().then(values=>values.join(',')),'玩家 ID,账号身份,注册时间');
+    assert.doesNotMatch(await page.locator('.profile-facts').textContent(),/北京时间/);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
     assert.equal(await page.locator('.profile-panel').first().isVisible(),true);
     assert.equal(await page.locator('.profile-panel').nth(1).isVisible(),false);
+    assert.equal(await page.locator('.profile-panel').first().locator('label').evaluateAll(labels=>labels[1].getBoundingClientRect().top>labels[0].getBoundingClientRect().bottom),true);
     await page.getByRole('tab',{name:'密码'}).click();
     assert.equal(await page.locator('.profile-panel').nth(1).isVisible(),true);
+    assert.equal(await page.locator('.profile-panel').nth(1).locator('label').evaluateAll(labels=>labels.every((label,index)=>index===0||label.getBoundingClientRect().top>labels[index-1].getBoundingClientRect().bottom)),true);
     await page.getByRole('tab',{name:'用户名'}).click();
     const input=page.locator('.profile-file-input');
     const dataUrl=await page.evaluate(()=>{const canvas=document.createElement('canvas');canvas.width=20;canvas.height=20;const context=canvas.getContext('2d');context.fillStyle='#86cfa1';context.fillRect(0,0,20,20);return canvas.toDataURL('image/png');});

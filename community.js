@@ -154,7 +154,7 @@ async function profile(content){
   actions.append(saveAvatar,resetAvatar);avatarForm.append(picker,actions,avatarStatus);
   avatarForm.addEventListener('submit',async event=>{event.preventDefault();const file=fileInput.files?.[0];if(!file){avatarStatus.textContent='请先选择一张图片。';return;}if(!['image/png','image/jpeg','image/webp'].includes(file.type)){avatarStatus.textContent='请选择 PNG、JPG 或 WebP 图片。';return;}saveAvatar.disabled=true;avatarStatus.textContent='正在处理头像…';try{const avatarData=await prepareAvatar(file);await request('/api/profile/avatar',{method:'POST',body:JSON.stringify({avatarData})});avatarVersion++;clearPreview();currentAvatar.src=avatarUrl(user.id);syncAdminLink();fileInput.value='';fileName.textContent='尚未选择图片';avatarStatus.textContent='头像已更新。';}catch(error){avatarStatus.textContent=friendlyError(error);saveAvatar.disabled=false;}});
   avatarControls.append(avatarForm);avatarPanel.append(currentAvatar,avatarControls);content.append(avatarPanel);
-  try{const {profile}=await request('/api/profile');const created=el('p','profile-created','注册时间：'+beijingTime(profile.createdAt,'full')+'（北京时间）');overview.append(created);}
+  try{const {profile}=await request('/api/profile');facts.append(el('dt','','注册时间'),el('dd','',beijingTime(profile.createdAt,'full')));}
   catch(error){overview.append(notice(friendlyError(error)));}
   const settings=el('section','profile-settings');settings.append(el('span','profile-section-kicker','账号设置'),el('h2','','账号与安全'),el('p','profile-settings-intro','选择一项修改；保存时需填写当前密码。'));
   const tabs=el('div','profile-settings-tabs');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','账号设置');
