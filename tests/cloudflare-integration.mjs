@@ -204,7 +204,11 @@ try {
   assert.equal((await call(`/api/pk/invites/${invitation.id}`,'POST',{decision:'accept'},admin.token))[1].roomCode,inviteRoom.code);
   assert.equal((await call(`/api/pk/rooms/${inviteRoom.code}`,'GET',undefined,token))[1].room.guest.id,admin.user.id);
   assert.equal((await call('/api/pk/invites','GET',undefined,admin.token))[1].incoming.length,0);
+  const pendingRoom=(await call('/api/pk/rooms','POST',{game:'tap'},token))[1].room;
+  assert.equal((await call('/api/pk/invites','POST',{userId:admin.user.id,code:pendingRoom.code},token))[0],201);
   assert.equal((await call(`/api/friends/${admin.user.id}`,'DELETE',undefined,token))[0],200);
+  assert.equal((await call('/api/friends','GET',undefined,admin.token))[1].friends.length,0);
+  assert.equal((await call('/api/pk/invites','GET',undefined,admin.token))[1].incoming.length,0);
   assert.equal((await call(`/api/friends/${admin.user.id}/messages`,'GET',undefined,token))[0],403);
   assert.equal((await call('/api/admin/topics/1','DELETE',undefined,admin.token))[0],200);
   assert.equal((await call('/api/topics/1/replies'))[1].items.length,0);

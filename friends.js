@@ -26,6 +26,15 @@ async function refreshSummary(){
 function heading(title,copy){const wrap=make('div','club-heading');wrap.innerHTML='<span class="eyebrow">FROG FRIENDS</span><h1></h1><p></p>';wrap.querySelector('h1').textContent=title;wrap.querySelector('p').textContent=copy;return wrap;}
 function notice(text){return make('p','friends-notice',text);}
 function action(label,fn,className='friend-action'){const button=make('button',className,label);button.type='button';button.addEventListener('click',()=>fn(button));return button;}
+function removeFriend(card,person,trigger){
+  const prompt=make('div','friend-remove-confirm');prompt.append(make('span','','删除后将无法继续私信或邀请对战，聊天记录会保留。'));
+  const confirm=action('确认删除',async button=>{
+    button.disabled=true;
+    try{await api(`friends/${person.id}`,{method:'DELETE'});await refreshDashboard();await refreshSummary();const status=content.querySelector('#friends-status');if(status)status.textContent=`已删除好友 ${person.username}。`;}
+    catch(error){button.disabled=false;const status=content.querySelector('#friends-status');if(status)status.textContent=error.message;}
+  },'friend-remove-final');
+  prompt.append(confirm,action('取消',()=>{prompt.remove();trigger.disabled=false;trigger.focus();},'friend-quiet'));card.append(prompt);confirm.focus();
+}
 async function mutate(button,path,body,after){
   button.disabled=true;try{const data=await api(path,{method:'POST',body});await after?.(data);await refreshSummary();}
   catch(error){const status=content.querySelector('#friends-status');if(status)status.textContent=error.message;button.disabled=false;}
@@ -36,7 +45,7 @@ function renderPeople(target,people,mode){
   for(const person of people){
     const card=make('div','friend-row');card.append(avatar(person.id));
     const copy=make('div','friend-row-copy');copy.append(make('strong','',person.username),make('small','',`ID ${person.publicId}${mode==='friend'?(person.online?' · 在线':' · 暂未在线'):''}`));card.append(copy);
-    if(mode==='friend'){const link=make('a','friend-action','发私信');link.href=`#friends/${person.publicId}`;card.append(link);if(person.unread)card.append(make('span','friend-unread',String(person.unread)));}
+    if(mode==='friend'){const link=make('a','friend-action','发私信');link.href=`#friends/${person.publicId}`;card.append(link);card.append(action('删除好友',button=>{button.disabled=true;removeFriend(card,person,button);},'friend-remove'));if(person.unread)card.append(make('span','friend-unread',String(person.unread)));}
     else if(mode==='incoming'){card.append(action('接受',button=>mutate(button,`friends/requests/${person.id}`,{decision:'accept'},refreshDashboard)));card.append(action('拒绝',button=>mutate(button,`friends/requests/${person.id}`,{decision:'decline'},refreshDashboard),'friend-quiet'));}
     else card.append(action('撤回',button=>mutate(button,`friends/requests/${person.id}`,{decision:'cancel'},refreshDashboard),'friend-quiet'));
     target.append(card);

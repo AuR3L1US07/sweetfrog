@@ -197,7 +197,9 @@ export async function handleApi(request, env) {
     if(friendRemoval&&method==='DELETE'){
       requireUser();const otherId=Number(friendRemoval[1]);if(!Number.isSafeInteger(otherId)||otherId===user.id)fail(400,'好友无效');
       const result=await run("DELETE FROM friend_links WHERE user_low=? AND user_high=? AND status='accepted'",...friendPair(otherId));
-      if(!result.meta.changes)fail(404,'好友关系不存在');return json({ok:true});
+      if(!result.meta.changes)fail(404,'好友关系不存在');
+      await run("UPDATE pk_invites SET status='expired' WHERE status='pending' AND ((from_user=? AND to_user=?) OR (from_user=? AND to_user=?))",user.id,otherId,otherId,user.id);
+      return json({ok:true});
     }
     const messagePath=/^\/api\/friends\/(\d+)\/messages$/.exec(path);
     if(messagePath){
@@ -244,6 +246,7 @@ export async function handleApi(request, env) {
       if(!Number.isSafeInteger(id)||!['accept','decline'].includes(decision))fail(400,'邀请操作无效');
       const invite=await first("SELECT i.*,r.guest_id,r.starts_at,r.created_at AS room_created FROM pk_invites i JOIN pk_rooms r ON r.code=i.room_code WHERE i.id=? AND i.to_user=? AND i.status='pending'",id,user.id);
       if(!invite)fail(404,'邀请不存在或已处理');
+      if(decision==='accept'&&(await friendship(invite.from_user))?.status!=='accepted'){await run("UPDATE pk_invites SET status='expired' WHERE id=? AND status='pending'",id);fail(409,'好友关系已解除，邀请已失效');}
       if(invite.created_at<Date.now()-600000||invite.room_created<Date.now()-86400000||invite.guest_id||invite.starts_at){await run("UPDATE pk_invites SET status='expired' WHERE id=? AND status='pending'",id);fail(409,'邀请已过期');}
       if(decision==='decline'){await run("UPDATE pk_invites SET status='declined' WHERE id=? AND to_user=? AND status='pending'",id,user.id);return json({ok:true});}
       const result=await run('UPDATE pk_rooms SET guest_id=? WHERE code=? AND host_id=? AND guest_id IS NULL AND starts_at IS NULL',user.id,invite.room_code,invite.from_user);

@@ -84,8 +84,20 @@ try{
   await guestPage.getByRole('button',{name:'接受并进入'}).click();
   await guestPage.waitForURL('**/#pk/*');assert.equal(new URL(guestPage.url()).hash,'#pk/'+code);
   await hostPage.locator('.pk-player-name').getByText(guest.user.username).waitFor();
+  await guestPage.goto(base+'/#friends');
+  await guestPage.getByRole('button',{name:'删除好友'}).click();
+  await guestPage.getByText('删除后将无法继续私信或邀请对战，聊天记录会保留。').waitFor();
+  await guestPage.getByRole('button',{name:'取消'}).click();
+  assert.equal(await guestPage.getByRole('link',{name:'发私信'}).count(),1);
+  await guestPage.getByRole('button',{name:'删除好友'}).click();
+  await guestPage.getByRole('button',{name:'确认删除'}).click();
+  await guestPage.getByText(`已删除好友 ${host.user.username}。`).waitFor();
+  assert.equal(await guestPage.getByRole('link',{name:'发私信'}).count(),0);
+  await hostPage.goto(base+'/#friends');
+  await hostPage.getByRole('button',{name:'刷新好友与邀请'}).click();
+  assert.equal(await hostPage.getByRole('link',{name:'发私信'}).count(),0);
   assert.deepEqual(errors,[]);
-  console.log('PASS: add friend by name, accept, private chat and reply, mobile drawer, online PK invitation');
+  console.log('PASS: add friend, chat, invite, remove friend with confirmation, mobile drawer');
 }finally{
   await browser?.close();
   if(server){const stopped=new Promise(resolve=>server.once('exit',resolve));server.kill();await stopped;}
