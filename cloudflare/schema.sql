@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS notifications(id INTEGER PRIMARY KEY, user_id INTEGER
 CREATE INDEX IF NOT EXISTS idx_notifications_inbox ON notifications(user_id,read_at,created_at DESC);
 CREATE TABLE IF NOT EXISTS friend_links(user_low INTEGER NOT NULL REFERENCES users(id), user_high INTEGER NOT NULL REFERENCES users(id), requester_id INTEGER NOT NULL REFERENCES users(id), status TEXT NOT NULL CHECK(status IN ('pending','accepted','declined')), updated_at INTEGER NOT NULL, PRIMARY KEY(user_low,user_high));
 CREATE INDEX IF NOT EXISTS idx_friend_links_high ON friend_links(user_high,status);
+CREATE TABLE IF NOT EXISTS friend_notes(owner_id INTEGER NOT NULL REFERENCES users(id), friend_id INTEGER NOT NULL REFERENCES users(id), note TEXT NOT NULL, PRIMARY KEY(owner_id,friend_id));
+CREATE TABLE IF NOT EXISTS earned_titles(user_id INTEGER NOT NULL REFERENCES users(id), title_key TEXT NOT NULL, earned_at INTEGER NOT NULL, PRIMARY KEY(user_id,title_key));
 CREATE TABLE IF NOT EXISTS friend_messages(id INTEGER PRIMARY KEY, sender_id INTEGER NOT NULL REFERENCES users(id), recipient_id INTEGER NOT NULL REFERENCES users(id), body TEXT NOT NULL, created_at INTEGER NOT NULL, read_at INTEGER);
 CREATE INDEX IF NOT EXISTS idx_friend_messages_inbox ON friend_messages(recipient_id,sender_id,id);
 CREATE TABLE IF NOT EXISTS pk_invites(id INTEGER PRIMARY KEY, room_code TEXT NOT NULL REFERENCES pk_rooms(code), from_user INTEGER NOT NULL REFERENCES users(id), to_user INTEGER NOT NULL REFERENCES users(id), status TEXT NOT NULL CHECK(status IN ('pending','accepted','declined','expired')), created_at INTEGER NOT NULL);

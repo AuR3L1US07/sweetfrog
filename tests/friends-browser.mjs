@@ -30,8 +30,8 @@ try{
     await hostPage.evaluate(section=>location.hash=section,section);
     await hostPage.waitForFunction(section=>{
       const current=document.querySelectorAll('.site-header nav a.active');
-      return current.length===(section==='tap'?0:1)&&
-        (section==='tap'||current[0].getAttribute('href')==='#'+section)&&
+      return current.length===(['tap','friends'].includes(section)?0:1)&&
+        (['tap','friends'].includes(section)||current[0].getAttribute('href')==='#'+section)&&
         (section==='tap'||document.querySelector('#lobby').hidden&&document.querySelector('#game-screen').hidden);
     },section);
   }
@@ -45,6 +45,11 @@ try{
   await hostPage.getByRole('button',{name:'接受',exact:true}).click();
   await hostPage.getByRole('link',{name:'发私信'}).waitFor();
   await guestPage.reload();await guestPage.getByRole('link',{name:'发私信'}).waitFor();
+  assert.equal(await guestPage.locator('.site-header a[href="#friends"]').count(),0);
+  await guestPage.getByRole('button',{name:'备注',exact:true}).click();
+  await guestPage.locator('.friend-note-editor input').fill('开黑搭子');
+  await guestPage.getByRole('button',{name:'保存备注'}).click();
+  await guestPage.getByText('开黑搭子',{exact:true}).waitFor();
   await guestPage.evaluate(()=>window.__savedFriendAvatar=document.querySelector('#friends-content .friend-avatar'));
   await guestPage.getByRole('button',{name:'刷新好友与邀请'}).click();
   await guestPage.getByText('好友与邀请已更新。').waitFor();
@@ -68,7 +73,7 @@ try{
   await guestPage.waitForFunction(()=>document.querySelector('#site-navigation').getBoundingClientRect().right<=innerWidth+1);
   const drawerBox=await guestPage.evaluate(()=>{const node=document.querySelector('#site-navigation'),rect=node.getBoundingClientRect();return {left:rect.left,right:rect.right,width:rect.width,viewport:innerWidth,transform:getComputedStyle(node).transform,visibility:getComputedStyle(node).visibility,header:document.querySelector('.site-header').getBoundingClientRect().right};});
   assert.ok(drawerBox.left>=-1&&drawerBox.right<=drawerBox.viewport+1,JSON.stringify(drawerBox));
-  for(const label of ['大厅','对战','匹配','留言','社区','排行','好友'])assert.equal(await guestPage.locator('.site-header nav .nav-label').filter({hasText:label}).count(),1);
+  for(const label of ['大厅','对战','匹配','留言','社区','排行','通知'])assert.equal(await guestPage.locator('.site-header nav .nav-label').filter({hasText:label}).count(),1);
   await guestPage.screenshot({path:'tests/friends-drawer-mobile.png'});
   await guestPage.locator('.nav-drawer-head button').click();
   assert.equal(await guestPage.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
@@ -87,6 +92,7 @@ try{
   await guestPage.goto(base+'/#friends');
   await guestPage.getByRole('button',{name:'删除好友'}).click();
   await guestPage.getByText('删除后将无法继续私信或邀请对战，聊天记录会保留。').waitFor();
+  assert.equal(await guestPage.locator('.friend-row.is-editing').evaluate(row=>{const copy=row.querySelector('.friend-row-copy').getBoundingClientRect(),prompt=row.querySelector('.friend-remove-confirm').getBoundingClientRect();return copy.width>150&&prompt.top>=copy.bottom;}),true);
   await guestPage.getByRole('button',{name:'取消'}).click();
   assert.equal(await guestPage.getByRole('link',{name:'发私信'}).count(),1);
   await guestPage.getByRole('button',{name:'删除好友'}).click();

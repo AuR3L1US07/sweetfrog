@@ -31,6 +31,18 @@ try{
     await page.waitForFunction(()=>document.querySelectorAll('.profile-match-value').length===4);
     await page.getByRole('heading',{name:'最近对局'}).waitFor();
     await page.getByRole('heading',{name:'成就与称号'}).waitFor();
+    assert.equal(await page.locator('.profile-title-card').count(),2);
+    await page.locator('.profile-friends-link').waitFor();
+    await page.getByRole('link',{name:'查看全部成就 →'}).click();
+    await page.getByRole('heading',{name:'全部成就与称号'}).waitFor();
+    await page.waitForFunction(()=>document.querySelectorAll('.profile-title-card').length===11);
+    assert.equal(await page.locator('.profile-title-button:disabled').first().evaluate(node=>getComputedStyle(node).cursor),'default');
+    await page.getByRole('link',{name:'← 返回个人资料'}).click();
+    await page.getByRole('heading',{name:'账号与安全'}).waitFor();
+    await page.getByRole('link',{name:'查看全部对局 →'}).click();
+    await page.getByRole('heading',{name:'全部对局记录'}).waitFor();
+    await page.getByRole('link',{name:'← 返回个人资料'}).click();
+    await page.getByRole('heading',{name:'账号与安全'}).waitFor();
     await page.locator('.profile-current-title').waitFor(); assert.equal(await page.locator('.profile-current-title').textContent(),'青蛙学徒');
     assert.match(await page.locator('.profile-match-record').textContent(),/胜率/);
     await page.locator('.profile-facts dd').nth(2).waitFor();

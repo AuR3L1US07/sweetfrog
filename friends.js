@@ -2,12 +2,10 @@ import { iconSvg } from './icons.js';
 import { beijingTime } from './beijing-time.js';
 
 const page=document.createElement('main');page.id='friends-page';page.hidden=true;
-page.innerHTML='<nav class="club-breadcrumb" aria-label="当前位置"><a href="#games">← 游戏大厅</a><span>好友私信</span></nav><div id="friends-content"></div>';
+page.innerHTML='<nav class="club-breadcrumb" aria-label="当前位置"><a href="#profile">← 个人资料</a><span>好友私信</span></nav><div id="friends-content"></div>';
 document.querySelector('#game-screen').before(page);
 const content=page.querySelector('#friends-content');
-const nav=document.createElement('a');nav.href='#friends';nav.className='club-nav-link';nav.id='friends-nav-link';nav.textContent='好友';
-document.querySelector('#sound-toggle').before(nav);
-const badge=document.createElement('span');badge.className='nav-badge';badge.id='friends-badge';badge.hidden=true;nav.append(badge);
+const badge=document.createElement('span');badge.className='nav-badge';badge.id='friends-badge';badge.hidden=true;page.querySelector('nav').append(badge);
 const make=(tag,className,text)=>{const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node;};
 const token=()=>{try{return localStorage.getItem('sweetfrog-session')||'';}catch{return '';}};
 let currentRoute=0,chatTimer=0,lastMessageId=0,shownMessages=new Set(),summaryTimer=0,summaryBusy=false;
@@ -17,7 +15,7 @@ async function api(path,options={}){
   const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(data.error||'连接失败，请稍后再试');return data;
 }
 function avatar(id){const img=make('img','friend-avatar');img.alt='';img.src=`/api/avatars/${id}`;img.loading='lazy';img.onerror=()=>{img.onerror=null;img.src='./assets/default-frog-avatar.svg';};return img;}
-function setBadge(count){badge.hidden=!count;badge.textContent=count>99?'99+':String(count);nav.setAttribute('aria-label',count?`好友，有 ${count} 条待处理消息或邀请`:'好友');}
+function setBadge(count){badge.hidden=!count;badge.textContent=count>99?'99+':String(count);const profileBadge=document.querySelector('#profile-friends-badge');if(profileBadge){profileBadge.hidden=!count;profileBadge.textContent=`${count} 条消息 / 申请`;}}
 async function refreshSummary(){
   if(summaryBusy)return;if(!token()){setBadge(0);return;}summaryBusy=true;
   try{const [friends,invites]=await Promise.all([api('friends'),api('pk/invites')]);setBadge(friends.unread+friends.incoming.length+invites.incoming.length);}
@@ -27,13 +25,20 @@ function heading(title,copy){const wrap=make('div','club-heading');wrap.innerHTM
 function notice(text){return make('p','friends-notice',text);}
 function action(label,fn,className='friend-action'){const button=make('button',className,label);button.type='button';button.addEventListener('click',()=>fn(button));return button;}
 function removeFriend(card,person,trigger){
-  const prompt=make('div','friend-remove-confirm');prompt.append(make('span','','删除后将无法继续私信或邀请对战，聊天记录会保留。'));
+  card.querySelector('.friend-inline-editor')?.remove();card.classList.add('is-editing');
+  const prompt=make('div','friend-remove-confirm friend-inline-editor');prompt.append(make('span','','删除后将无法继续私信或邀请对战，聊天记录会保留。'));
   const confirm=action('确认删除',async button=>{
     button.disabled=true;
     try{await api(`friends/${person.id}`,{method:'DELETE'});await refreshDashboard();await refreshSummary();const status=content.querySelector('#friends-status');if(status)status.textContent=`已删除好友 ${person.username}。`;}
     catch(error){button.disabled=false;const status=content.querySelector('#friends-status');if(status)status.textContent=error.message;}
   },'friend-remove-final');
-  prompt.append(confirm,action('取消',()=>{prompt.remove();trigger.disabled=false;trigger.focus();},'friend-quiet'));card.append(prompt);confirm.focus();
+  prompt.append(confirm,action('取消',()=>{prompt.remove();card.classList.remove('is-editing');trigger.disabled=false;trigger.focus();},'friend-quiet'));card.append(prompt);confirm.focus();
+}
+function editNote(card,person){
+  if(card.querySelector('.friend-inline-editor'))return;card.classList.add('is-editing');const form=make('form','friend-note-editor friend-inline-editor');
+  const label=make('label','','好友备注 · 仅自己可见');const input=make('input');input.maxLength=30;input.value=person.note||'';input.placeholder='例如：一起开黑的同学';label.append(input);const save=make('button','friend-action','保存备注');save.type='submit';
+  form.append(label,save,action('取消',()=>{form.remove();card.classList.remove('is-editing');},'friend-quiet'));card.append(form);input.focus();
+  form.addEventListener('submit',async event=>{event.preventDefault();save.disabled=true;try{await api(`friends/${person.id}/note`,{method:'POST',body:{note:input.value}});await refreshDashboard();}catch(error){save.disabled=false;const status=content.querySelector('#friends-status');if(status)status.textContent=error.message;}});
 }
 async function mutate(button,path,body,after){
   button.disabled=true;try{const data=await api(path,{method:'POST',body});await after?.(data);await refreshSummary();}
@@ -44,8 +49,8 @@ function renderPeople(target,people,mode){
   if(!people.length){target.append(notice(mode==='friend'?'还没有好友。搜索昵称或 ID，发出第一份申请吧。':'暂时没有待处理的申请。'));return;}
   for(const person of people){
     const card=make('div','friend-row');card.append(avatar(person.id));
-    const copy=make('div','friend-row-copy');copy.append(make('strong','',person.username),make('small','',`ID ${person.publicId}${mode==='friend'?(person.online?' · 在线':' · 暂未在线'):''}`));card.append(copy);
-    if(mode==='friend'){const link=make('a','friend-action','发私信');link.href=`#friends/${person.publicId}`;card.append(link);card.append(action('删除好友',button=>{button.disabled=true;removeFriend(card,person,button);},'friend-remove'));if(person.unread)card.append(make('span','friend-unread',String(person.unread)));}
+    const copy=make('div','friend-row-copy');copy.append(make('strong','',person.note||person.username),make('small','',`${person.note?person.username+' · ':''}ID ${person.publicId}${mode==='friend'?(person.online?' · 在线':' · 暂未在线'):''}`));card.append(copy);
+    if(mode==='friend'){const link=make('a','friend-action','发私信');link.href=`#friends/${person.publicId}`;card.append(link);card.append(action('备注',()=>editNote(card,person),'friend-quiet'));card.append(action('删除好友',button=>{button.disabled=true;removeFriend(card,person,button);},'friend-remove'));if(person.unread)card.append(make('span','friend-unread',String(person.unread)));}
     else if(mode==='incoming'){card.append(action('接受',button=>mutate(button,`friends/requests/${person.id}`,{decision:'accept'},refreshDashboard)));card.append(action('拒绝',button=>mutate(button,`friends/requests/${person.id}`,{decision:'decline'},refreshDashboard),'friend-quiet'));}
     else card.append(action('撤回',button=>mutate(button,`friends/requests/${person.id}`,{decision:'cancel'},refreshDashboard),'friend-quiet'));
     target.append(card);
@@ -131,7 +136,7 @@ async function renderChat(peerId,id){
   content.replaceChildren();
   const back=make('a','forum-back','← 返回好友列表');back.href='#friends';content.append(back);
   const panel=make('section','friend-chat');const head=make('div','friend-chat-head');head.append(avatar(peer.id));
-  const label=make('div','');label.append(make('h1','',peer.username),make('span','',`ID ${peer.publicId} · ${peer.online?'在线':'暂未在线'}`));head.append(label);panel.append(head);
+  const label=make('div','');label.append(make('h1','',peer.note||peer.username),make('span','',`${peer.note?peer.username+' · ':''}ID ${peer.publicId} · ${peer.online?'在线':'暂未在线'}`));head.append(label);panel.append(head);
   const messages=make('div','friend-messages');messages.id='friend-messages';messages.setAttribute('aria-label',`与${peer.username}的私信`);panel.append(messages);
   const form=make('form','friend-compose');form.innerHTML='<label for="friend-message-body">发送私信</label><div><textarea id="friend-message-body" name="body" maxlength="1000" rows="2" placeholder="写点什么…"></textarea><button type="submit">发送</button></div><p role="status"></p>';
   form.querySelector('label').textContent='发送私信 · 回车发送，Shift + 回车换行';
@@ -143,7 +148,7 @@ async function renderChat(peerId,id){
   chatTimer=setInterval(()=>pollChat(peerId,friends.self.id,id),3000);
 }
 function renderRoute(){
-  clearInterval(chatTimer);chatTimer=0;const route=/^friends(?:\/(\d+))?$/.exec(location.hash.slice(1)),id=++currentRoute;page.hidden=!route;nav.classList.toggle('active',Boolean(route));
+  clearInterval(chatTimer);chatTimer=0;const route=/^friends(?:\/(\d+))?$/.exec(location.hash.slice(1)),id=++currentRoute;page.hidden=!route;
   if(!route)return;
   document.querySelector('#lobby').hidden=true;document.querySelector('#game-screen').hidden=true;document.querySelector('#club-page').hidden=true;
   content.replaceChildren();

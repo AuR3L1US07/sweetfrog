@@ -106,7 +106,14 @@ export async function handleApi(request, env) {
       const played=await all('SELECT winner_id AS winnerId FROM match_results WHERE host_id=? OR guest_id=? ORDER BY finished_at,room_code,round',playerId,playerId);
       let streak=0,threeWins=false;for(const result of played){streak=result.winnerId===playerId?streak+1:0;if(streak>=3)threeWins=true;}
       const aim=(await first('SELECT aim_mastered AS mastered FROM users WHERE id=?',playerId))?.mastered;
-      return {apprentice:true,first_win:wins>0,three_wins:threeWins,sharp_eye:Boolean(aim)};
+      const games=(await first('SELECT count(*) AS n FROM scores WHERE user_id=?',playerId)).n;
+      const posts=(await first('SELECT count(*) AS n FROM topics WHERE user_id=?',playerId)).n;
+      const likes=(await first('SELECT count(*) AS n FROM suggestion_votes v JOIN suggestions s ON s.id=v.suggestion_id WHERE s.user_id=? AND v.user_id<>?',playerId,playerId)).n;
+      const friends=(await first("SELECT count(*) AS n FROM friend_links WHERE (user_low=? OR user_high=?) AND status='accepted'",playerId,playerId)).n;
+      const unlocked={apprentice:true,first_win:wins>0,three_wins:threeWins,sharp_eye:Boolean(aim),ten_wins:wins>=10,fifty_wins:wins>=50,five_matches:played.length>=5,all_games:games>=5,first_post:posts>0,ideas_five:likes>=5,friend_three:friends>=3};
+      await db.batch(Object.entries(unlocked).filter(([,earned])=>earned).map(([key])=>statement('INSERT OR IGNORE INTO earned_titles(user_id,title_key,earned_at) VALUES(?,?,?)',[playerId,key,Date.now()])));
+      for(const row of await all('SELECT title_key AS key FROM earned_titles WHERE user_id=?',playerId))if(Object.hasOwn(unlocked,row.key))unlocked[row.key]=true;
+      return unlocked;
     }
     async function presenceState(){
       const cutoff=Date.now()-70000,queueCutoff=Date.now()-16000;
@@ -169,7 +176,7 @@ export async function handleApi(request, env) {
     const friendPair=otherId=>[Math.min(user.id,otherId),Math.max(user.id,otherId)];
     const friendship=async otherId=>first('SELECT status,requester_id AS requesterId,updated_at AS updatedAt FROM friend_links WHERE user_low=? AND user_high=?',...friendPair(otherId));
     async function friendSummary(){
-      const friends=await all(`SELECT u.id,u.public_id AS publicId,u.username,EXISTS(SELECT 1 FROM online_presence p WHERE p.user_id=u.id AND p.last_seen>=?) AS online,(SELECT count(*) FROM friend_messages m WHERE m.sender_id=u.id AND m.recipient_id=? AND m.read_at IS NULL) AS unread FROM friend_links f JOIN users u ON u.id=CASE WHEN f.user_low=? THEN f.user_high ELSE f.user_low END WHERE (f.user_low=? OR f.user_high=?) AND f.status='accepted' AND u.banned=0 ORDER BY online DESC,u.username COLLATE NOCASE`,Date.now()-70000,user.id,user.id,user.id,user.id);
+      const friends=await all(`SELECT u.id,u.public_id AS publicId,u.username,(SELECT note FROM friend_notes WHERE owner_id=? AND friend_id=u.id) AS note,EXISTS(SELECT 1 FROM online_presence p WHERE p.user_id=u.id AND p.last_seen>=?) AS online,(SELECT count(*) FROM friend_messages m WHERE m.sender_id=u.id AND m.recipient_id=? AND m.read_at IS NULL) AS unread FROM friend_links f JOIN users u ON u.id=CASE WHEN f.user_low=? THEN f.user_high ELSE f.user_low END WHERE (f.user_low=? OR f.user_high=?) AND f.status='accepted' AND u.banned=0 ORDER BY online DESC,u.username COLLATE NOCASE`,user.id,Date.now()-70000,user.id,user.id,user.id,user.id);
       const requests=await all(`SELECT u.id,u.public_id AS publicId,u.username,f.requester_id AS requesterId FROM friend_links f JOIN users u ON u.id=CASE WHEN f.user_low=? THEN f.user_high ELSE f.user_low END WHERE (f.user_low=? OR f.user_high=?) AND f.status='pending' AND u.banned=0 ORDER BY f.updated_at DESC LIMIT 100`,user.id,user.id,user.id);
       return {self:{id:user.id,publicId:user.publicId,username:user.username},friends,incoming:requests.filter(item=>item.requesterId!==user.id),outgoing:requests.filter(item=>item.requesterId===user.id),unread:friends.reduce((sum,item)=>sum+item.unread,0)};
     }
@@ -209,7 +216,16 @@ export async function handleApi(request, env) {
       requireUser();const otherId=Number(friendRemoval[1]);if(!Number.isSafeInteger(otherId)||otherId===user.id)fail(400,'好友无效');
       const result=await run("DELETE FROM friend_links WHERE user_low=? AND user_high=? AND status='accepted'",...friendPair(otherId));
       if(!result.meta.changes)fail(404,'好友关系不存在');
+      await run('DELETE FROM friend_notes WHERE (owner_id=? AND friend_id=?) OR (owner_id=? AND friend_id=?)',user.id,otherId,otherId,user.id);
       await run("UPDATE pk_invites SET status='expired' WHERE status='pending' AND ((from_user=? AND to_user=?) OR (from_user=? AND to_user=?))",user.id,otherId,otherId,user.id);
+      return json({ok:true});
+    }
+    const friendNote=/^\/api\/friends\/(\d+)\/note$/.exec(path);
+    if(friendNote&&method==='POST'){
+      requireUser();const otherId=Number(friendNote[1]);if((await friendship(otherId))?.status!=='accepted')fail(403,'只能备注自己的好友');
+      const data=await body(request),note=text(data.note,30);if(typeof data.note!=='string'||note.length>30)fail(400,'备注最多 30 个字');
+      if(note)await run('INSERT INTO friend_notes(owner_id,friend_id,note) VALUES(?,?,?) ON CONFLICT(owner_id,friend_id) DO UPDATE SET note=excluded.note',user.id,otherId,note);
+      else await run('DELETE FROM friend_notes WHERE owner_id=? AND friend_id=?',user.id,otherId);
       return json({ok:true});
     }
     const messagePath=/^\/api\/friends\/(\d+)\/messages$/.exec(path);
@@ -361,21 +377,24 @@ export async function handleApi(request, env) {
     if(path==='/api/match/stats'&&method==='GET'){requireUser();return json({stats:await matchStats(user.id)});}
     if(path==='/api/match/history'&&method==='GET'){
       requireUser();await finalizeMatches();
+      const query=new URL(request.url).searchParams,limit=Number(query.get('limit')||20),offset=Number(query.get('offset')||0);
+      if(!Number.isSafeInteger(limit)||limit<1||limit>50||!Number.isSafeInteger(offset)||offset<0)fail(400,'分页参数无效');
       const items=await all(`SELECT r.room_code AS roomCode,r.round,r.game,r.finished_at AS finishedAt,r.winner_id AS winnerId,
         CASE WHEN r.host_id=? THEN r.host_score ELSE r.guest_score END AS ownScore,
         CASE WHEN r.host_id=? THEN r.guest_score ELSE r.host_score END AS opponentScore,
         CASE WHEN r.host_id=? THEN r.guest_id ELSE r.host_id END AS opponentId,
         CASE WHEN r.host_id=? THEN coalesce(g.username,r.guest_name,'游客') ELSE coalesce(h.username,r.host_name,'游客') END AS opponentName
         FROM match_results r LEFT JOIN users h ON h.id=r.host_id LEFT JOIN users g ON g.id=r.guest_id
-        WHERE r.host_id=? OR r.guest_id=? ORDER BY r.finished_at DESC,r.room_code DESC,r.round DESC LIMIT 20`,user.id,user.id,user.id,user.id,user.id,user.id);
-      return json({items:items.map(item=>({...item,result:item.winnerId===null?'draw':item.winnerId===user.id?'win':'loss'}))});
+        WHERE r.host_id=? OR r.guest_id=? ORDER BY r.finished_at DESC,r.room_code DESC,r.round DESC LIMIT ? OFFSET ?`,user.id,user.id,user.id,user.id,user.id,user.id,limit+1,offset);
+      const hasMore=items.length>limit;
+      return json({hasMore,items:items.slice(0,limit).map(item=>({...item,result:item.winnerId===null?'draw':item.winnerId===user.id?'win':'loss'}))});
     }
     if(path==='/api/profile/titles'){
       requireUser();
       if(method==='GET')return json({unlocked:await unlockedTitles(user.id),selected:user.titleKey});
       if(method==='POST'){
-        const key=(await body(request)).key;if(!['apprentice','first_win','three_wins','sharp_eye'].includes(key))fail(400,'称号无效');
-        if(!(await unlockedTitles(user.id))[key])fail(403,'尚未获得这个称号');
+        const key=(await body(request)).key,unlocked=await unlockedTitles(user.id);if(!Object.hasOwn(unlocked,key))fail(400,'称号无效');
+        if(!unlocked[key])fail(403,'尚未获得这个称号');
         await run('UPDATE users SET title_key=? WHERE id=?',key,user.id);return json({ok:true,titleKey:key});
       }
     }
@@ -560,7 +579,7 @@ export async function handleApi(request, env) {
       requireUser(); const data=await body(request),score=data.score;
       if (!Number.isSafeInteger(score) || score<0 || score>10000000) fail(400,'成绩无效');
       await run(`INSERT INTO scores(user_id,game,score) VALUES(?,?,?) ON CONFLICT(user_id,game) DO UPDATE SET score=excluded.score,updated_at=CURRENT_TIMESTAMP WHERE excluded.score>scores.score`,user.id,leader[1],score);
-      if(leader[1]==='aim'&&score>0&&Number.isSafeInteger(data.hits)&&Number.isSafeInteger(data.shots)&&data.shots>=10&&data.shots<=10000&&data.hits>=0&&data.hits<=data.shots&&Math.round(data.hits/data.shots*100)>=90)await run('UPDATE users SET aim_mastered=1 WHERE id=?',user.id);
+      if(leader[1]==='aim'&&score>0&&Number.isSafeInteger(data.hits)&&Number.isSafeInteger(data.shots)&&data.shots>=10&&data.shots<=10000&&data.hits>=10&&data.hits<=data.shots&&Math.round(data.hits/data.shots*100)>=90)await run('UPDATE users SET aim_mastered=1 WHERE id=?',user.id);
       return json({ok:true,self:(await rank(leader[1])).self});
     }
     if (path.startsWith('/api/admin/')) {

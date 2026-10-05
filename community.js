@@ -3,8 +3,9 @@ import { iconSvg } from './icons.js';
 import { beijingTime } from './beijing-time.js';
 
 const games = { tap:'逮住大青蛙', merge:'合成大青蛙', flap:'青蛙起飞', puzzle:'青蛙2048', aim:'青蛙定位练习' };
-const routes = new Set(['suggestions','discussion','leaderboard','notifications','account','profile']);
-const titleNames={apprentice:'青蛙学徒',first_win:'小试牛刀',three_wins:'连胜高手',sharp_eye:'百步穿杨'};
+const routes = new Set(['suggestions','discussion','leaderboard','notifications','account','profile','history','achievements']);
+const titleNames={apprentice:'青蛙学徒',first_win:'小试牛刀',three_wins:'连胜高手',sharp_eye:'百步穿杨',ten_wins:'常胜青蛙',fifty_wins:'池塘霸主',five_matches:'越战越勇',all_games:'五项全能',first_post:'初次发声',ideas_five:'灵感达人',friend_three:'广结蛙友'};
+const titleDescriptions={apprentice:'加入青蛙游戏厅即可获得',first_win:'快速匹配赢得第一场',three_wins:'快速匹配连续赢得 3 场',sharp_eye:'单人定位练习命中至少 10 次，命中率达 90%',ten_wins:'累计赢得 10 场快速匹配',fifty_wins:'累计赢得 50 场快速匹配',five_matches:'完成 5 场快速匹配',all_games:'五款游戏都提交过成绩',first_post:'在玩家社区发表第一篇帖子',ideas_five:'你的建议累计获得 5 次他人点赞',friend_three:'拥有 3 位好友'};
 const $ = selector => document.querySelector(selector);
 const el = (tag,className,text) => { const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node; };
 const makeButton = (label,onClick,className='') => { const node=el('button',className,label);node.type='button';node.addEventListener('click',onClick);return node; };
@@ -150,6 +151,24 @@ async function notifications(content){
     if(data.unread){await request('/api/notifications',{method:'POST'});setNotificationBadge(0);}
   }catch(error){list.append(notice(friendlyError(error)));}
 }
+function profileBack(content){const back=el('a','forum-back','← 返回个人资料');back.href='#profile';content.append(back);}
+function historyRow(item){const row=el('div','profile-history-row');row.append(memberAvatar(item.opponentId,item.opponentName,'profile-history-avatar'));const detail=el('div','profile-history-detail');detail.append(el('strong','',`${games[item.game]||'未知游戏'} · ${item.opponentName}`),el('time','',beijingTime(item.finishedAt,'full')));row.append(detail,el('span','profile-history-score',`${item.ownScore??'—'} : ${item.opponentScore??'—'}`),el('b','profile-history-result '+item.result,{win:'胜利',loss:'失败',draw:'平局'}[item.result]));return row;}
+async function historySection(content,preview=false){
+  const panel=el('section','profile-panel profile-history');panel.append(el('span','profile-section-kicker','MATCH HISTORY'),el('h2','',preview?'最近对局':'全部对局记录'),el('p','profile-section-copy',preview?'最近 3 场快速匹配，看看自己的发挥。':'按时间查看所有快速匹配记录。'));
+  const list=el('div','profile-history-list');panel.append(list);content.append(panel);let offset=0;
+  const more=makeButton('加载更多对局',()=>load(),'profile-more-button');
+  async function load(){more.disabled=true;try{const data=await request(`/api/match/history?limit=${preview?3:20}&offset=${offset}`);if(!offset&&!data.items.length)list.append(notice('还没有匹配记录，去打一场吧。'));for(const item of data.items)list.append(historyRow(item));offset+=data.items.length;more.hidden=!data.hasMore;}catch(error){panel.append(notice(friendlyError(error)));}finally{more.disabled=false;}}
+  await load();if(preview){const link=el('a','profile-more-link','查看全部对局 →');link.href='#history';panel.append(link);}else panel.append(more);
+}
+async function titlesSection(content,preview=false){
+  const panel=el('section','profile-panel profile-achievements');panel.append(el('span','profile-section-kicker','FROG TITLES'),el('h2','',preview?'成就与称号':'全部成就与称号'),el('p','profile-section-copy','完成挑战后解锁称号，选中的称号会显示在头像旁。'));
+  const list=el('div','profile-title-list');panel.append(list);content.append(panel);
+  try{const data=await request('/api/profile/titles');let entries=Object.entries(titleNames);if(preview)entries=entries.sort(([a],[b])=>Number(b===data.selected)-Number(a===data.selected)||Number(data.unlocked[b])-Number(data.unlocked[a])).slice(0,2);
+    for(const [key,label] of entries){const unlocked=data.unlocked[key],card=el('div','profile-title-card'+(unlocked?'':' is-locked'));const copy=el('div','');copy.append(el('strong','',label),el('span','',titleDescriptions[key]));const button=makeButton(key===data.selected?'佩戴中':unlocked?'佩戴称号':'未解锁',async()=>{button.disabled=true;button.classList.add('is-loading');try{const result=await request('/api/profile/titles',{method:'POST',body:JSON.stringify({key})});user.titleKey=result.titleKey;syncAdminLink();const current=$('.profile-current-title');if(current)current.textContent=label;list.querySelectorAll('button').forEach(item=>{item.textContent=item.dataset.unlocked==='true'?'佩戴称号':'未解锁';item.disabled=item.dataset.unlocked!=='true';});button.textContent='佩戴中';button.disabled=true;}catch(error){panel.append(notice(friendlyError(error)));button.disabled=false;}finally{button.classList.remove('is-loading');}},'profile-title-button');button.dataset.unlocked=String(unlocked);button.disabled=!unlocked||key===data.selected;card.append(copy,button);list.append(card);}
+  }catch(error){list.append(notice(friendlyError(error)));}
+  if(preview){const link=el('a','profile-more-link','查看全部成就 →');link.href='#achievements';panel.append(link);}
+}
+async function collectionPage(content,type){profileBack(content);if(!user){content.append(gate('登录后可查看自己的记录与成就。'));return;}if(type==='history')await historySection(content);else await titlesSection(content);}
 async function profile(content){
   content.append(heading('MY FROG ID','个人信息','查看账号资料，修改昵称或密码。'));
   if(!user){content.append(gate('请先登录后查看个人信息。'));return;}
@@ -157,6 +176,8 @@ async function profile(content){
   overview.append(el('span','profile-eyebrow','PLAYER CARD'),el('h2','',user.username),el('span','profile-current-title',titleNames[user.titleKey]||titleNames.apprentice));
   const facts=el('dl','profile-facts');facts.append(el('dt','','玩家 ID'),el('dd','',String(user.publicId)),el('dt','','账号身份'),el('dd','',user.role==='admin'?'管理员':'玩家'));
   overview.append(facts);content.append(overview);
+  const friendsLink=el('a','profile-friends-link');friendsLink.href='#friends';friendsLink.innerHTML=iconSvg('people')+'<strong>我的好友</strong><span class="profile-friends-count">读取中…</span><span id="profile-friends-badge" hidden></span><b>查看好友 →</b>';overview.append(friendsLink);
+  try{const data=await request('/api/friends');friendsLink.querySelector('.profile-friends-count').textContent=`${data.friends.length} 位`;const badge=friendsLink.querySelector('#profile-friends-badge'),count=data.unread+data.incoming.length;badge.hidden=!count;badge.textContent=`${count} 条消息 / 申请`;}catch{friendsLink.querySelector('.profile-friends-count').textContent='打开列表';}
   const avatarPanel=el('section','profile-avatar-panel');
   const currentAvatar=memberAvatar(user.id,'','profile-avatar');
   const avatarControls=el('div','profile-avatar-controls');
@@ -180,15 +201,8 @@ async function profile(content){
   const recordValues=el('div','profile-match-values');matchRecord.append(recordValues);overview.append(matchRecord);
   try{const {stats}=await request('/api/match/stats');for(const [label,value] of [['胜利',stats.wins],['失败',stats.losses],['平局',stats.draws],['胜率',`${stats.winRate}%`]]){const item=el('div','profile-match-value');item.append(el('strong','',String(value)),el('span','',label));recordValues.append(item);}}
   catch(error){matchRecord.append(notice(friendlyError(error)));}
-  const history=el('section','profile-panel profile-history');history.append(el('span','profile-section-kicker','MATCH HISTORY'),el('h2','','最近对局'),el('p','profile-section-copy','查看最近 20 场快速匹配的对手、游戏和分数。'));
-  const historyList=el('div','profile-history-list');history.append(historyList);content.append(history);
-  try{const {items}=await request('/api/match/history');if(!items.length)historyList.append(notice('还没有匹配记录，去打一场吧。'));for(const item of items){const row=el('div','profile-history-row');row.append(memberAvatar(item.opponentId,item.opponentName,'profile-history-avatar'));const detail=el('div','profile-history-detail');detail.append(el('strong','',`${games[item.game]||'未知游戏'} · ${item.opponentName}`),el('time','',beijingTime(item.finishedAt,'full')));row.append(detail,el('span','profile-history-score',`${item.ownScore??'—'} : ${item.opponentScore??'—'}`),el('b','profile-history-result '+item.result,{win:'胜利',loss:'失败',draw:'平局'}[item.result]));historyList.append(row);}}
-  catch(error){historyList.append(notice(friendlyError(error)));}
-  const achievements=el('section','profile-panel profile-achievements');achievements.append(el('span','profile-section-kicker','FROG TITLES'),el('h2','','成就与称号'),el('p','profile-section-copy','完成挑战后解锁称号，选中的称号会显示在头像旁。'));
-  const titleList=el('div','profile-title-list');achievements.append(titleList);content.append(achievements);
-  try{const data=await request('/api/profile/titles');const descriptions={apprentice:'加入青蛙游戏厅即可获得',first_win:'快速匹配赢得第一场',three_wins:'快速匹配连续赢得 3 场',sharp_eye:'青蛙定位练习至少命中 10 次，命中率达 90%'};
-    for(const [key,label] of Object.entries(titleNames)){const unlocked=data.unlocked[key],card=el('div','profile-title-card'+(unlocked?'':' is-locked'));const copy=el('div','');copy.append(el('strong','',label),el('span','',descriptions[key]));const button=makeButton(key===data.selected?'佩戴中':unlocked?'佩戴称号':'未解锁',async()=>{button.disabled=true;try{const result=await request('/api/profile/titles',{method:'POST',body:JSON.stringify({key})});user.titleKey=result.titleKey;syncAdminLink();overview.querySelector('.profile-current-title').textContent=label;titleList.querySelectorAll('button').forEach(item=>{item.textContent=item.dataset.unlocked==='true'?'佩戴称号':'未解锁';item.disabled=item.dataset.unlocked!=='true';});button.textContent='佩戴中';button.disabled=true;}catch(error){achievements.append(notice(friendlyError(error)));button.disabled=false;}},'profile-title-button');button.dataset.unlocked=String(unlocked);button.disabled=!unlocked||key===data.selected;card.append(copy,button);titleList.append(card);}
-  }catch(error){titleList.append(notice(friendlyError(error)));}
+  await historySection(content,true);
+  await titlesSection(content,true);
   const settings=el('section','profile-settings');settings.append(el('span','profile-section-kicker','账号设置'),el('h2','','账号与安全'),el('p','profile-settings-intro','选择一项修改；保存时需填写当前密码。'));
   const tabs=el('div','profile-settings-tabs');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','账号设置');
   const grid=el('div','profile-grid');settings.append(tabs,grid);content.append(settings);
@@ -213,7 +227,7 @@ function account(content){
   formNode.addEventListener('submit',async event=>{event.preventDefault();const button=formNode.querySelector('button'),status=formNode.querySelector('[role=status]');button.disabled=true;status.textContent='正在处理…';try{const data=await request('/api/'+accountMode,{method:'POST',body:JSON.stringify({username:formNode.elements.username.value.trim(),password:formNode.elements.password.value})});saveSession(data);location.hash=returnTo;returnTo='games';}catch(error){status.textContent=friendlyError(error);}finally{button.disabled=false;}});
   content.append(formNode);const guest=el('a','guest-link','游客登录 · 先逛逛 →');guest.href='#games';content.append(guest);
 }
-async function renderCurrent(){const route=location.hash.slice(1),detail=/^(suggestions|discussion)\/(new|\d+)$/.exec(route),base=detail?.[1]||route,visible=routes.has(base);page.hidden=!visible;if(!visible)return;if(base==='account'&&user){location.hash='profile';return;}$('#lobby').hidden=true;$('#game-screen').hidden=true;const content=el('div');content.id='club-content';$('#club-content').replaceWith(content);$('#club-location').textContent={suggestions:'意见留言',discussion:'玩家社区',leaderboard:'排行榜',notifications:'消息通知',account:'登录 / 注册',profile:'个人信息'}[base];document.querySelectorAll('[data-club-nav]').forEach(link=>link.classList.toggle('active',link.dataset.clubNav===base));if(detail){if(detail[2]==='new')composePage(content,base);else if(base==='suggestions')await suggestionDetail(content,detail[2]);else await topicDetail(content,detail[2]);}else if(base==='suggestions')await suggestions(content);else if(base==='discussion')await discussion(content);else if(base==='leaderboard')await leaderboard(content);else if(base==='notifications')await notifications(content);else if(base==='profile')await profile(content);else account(content);}
+async function renderCurrent(){const route=location.hash.slice(1),detail=/^(suggestions|discussion)\/(new|\d+)$/.exec(route),base=detail?.[1]||route,visible=routes.has(base);page.hidden=!visible;if(!visible)return;if(base==='account'&&user){location.hash='profile';return;}$('#lobby').hidden=true;$('#game-screen').hidden=true;const content=el('div');content.id='club-content';$('#club-content').replaceWith(content);$('#club-location').textContent={suggestions:'意见留言',discussion:'玩家社区',leaderboard:'排行榜',notifications:'消息通知',account:'登录 / 注册',profile:'个人信息',history:'对局记录',achievements:'成就称号'}[base];document.querySelectorAll('[data-club-nav]').forEach(link=>link.classList.toggle('active',link.dataset.clubNav===base));if(detail){if(detail[2]==='new')composePage(content,base);else if(base==='suggestions')await suggestionDetail(content,detail[2]);else await topicDetail(content,detail[2]);}else if(base==='suggestions')await suggestions(content);else if(base==='discussion')await discussion(content);else if(base==='leaderboard')await leaderboard(content);else if(base==='notifications')await notifications(content);else if(base==='profile')await profile(content);else if(base==='history'||base==='achievements')await collectionPage(content,base);else account(content);}
 window.addEventListener('hashchange',renderCurrent);
 window.addEventListener('sweetfrog:finished',async event=>{if(!user)return;const {game,score,hits,shots}=event.detail;if(!games[game])return;try{await request(`/api/leaderboards/${game}`,{method:'POST',body:JSON.stringify({score,...(game==='aim'?{hits,shots}:{})})});}catch(error){console.warn('成绩提交失败:',friendlyError(error));}});
 await refreshSession();syncAdminLink();refreshNotifications();renderCurrent();
