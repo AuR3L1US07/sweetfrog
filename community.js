@@ -14,7 +14,7 @@ const nav=$('.site-header nav');
 for(const [route,label] of [['suggestions','意见留言'],['discussion','玩家社区'],['leaderboard','排行榜']]){const link=el('a','club-nav-link',label);link.href='#'+route;link.dataset.clubNav=route;nav.insertBefore(link,$('#sound-toggle'));}
 const rankLink=el('a','game-rank-link','查看本游戏排行榜 ↗');rankLink.href='#leaderboard';$('#game-screen .play-footer').before(rankLink);
 let token='';try{token=localStorage.getItem('sweetfrog-session')||'';}catch{}
-let user=null,rankGame='tap',accountMode='login',returnTo='games',accountMessage='',avatarVersion=0;
+let user=null,rankGame='match',accountMode='login',returnTo='games',accountMessage='',avatarVersion=0;
 window.addEventListener('sweetfrog:login-return',event=>{if(typeof event.detail==='string'&&/^pk(?:\/[A-HJ-NP-Z2-9]{6})?$/.test(event.detail))returnTo=event.detail;});
 const friendlyError=error=>error.message||'暂时连接不上服务器，请稍后重试。';
 async function request(path,options={}){
@@ -106,12 +106,12 @@ async function topicDetail(content,id){
   }catch(error){container.replaceChildren(notice(friendlyError(error)));}
 }
 async function leaderboard(content){
-  content.append(heading('HIGH SCORE CLUB','游戏排行榜','五个游戏各有榜单。游客可以看，登录玩家完成一局后自动上榜。'));
-  const tabs=el('div','club-tabs');for(const [game,label] of Object.entries(games)){const tab=makeButton(label,()=>{rankGame=game;renderCurrent();},'club-tab');tab.classList.toggle('selected',game===rankGame);tab.setAttribute('aria-pressed',String(game===rankGame));tabs.append(tab);}content.append(tabs);
+  content.append(heading('HIGH SCORE CLUB','游戏排行榜','先看快速匹配胜场，再逛五款游戏的最高分。游客可以看榜，登录玩家才能留下战绩。'));
+  const tabs=el('div','club-tabs');for(const [game,label] of Object.entries({match:'匹配胜场',...games})){const tab=makeButton(label,()=>{rankGame=game;renderCurrent();},'club-tab');tab.classList.toggle('selected',game===rankGame);tab.setAttribute('aria-pressed',String(game===rankGame));tabs.append(tab);}content.append(tabs);
   const list=el('ol','club-ranks');content.append(list);list.append(notice('正在读取成绩…'));
   try{const data=await request(`/api/leaderboards/${rankGame}`);list.replaceChildren();if(!data.entries.length)list.append(notice('还没有玩家上榜，来拿第一名吧。'));
-    for(const entry of data.entries){const item=el('li','club-rank');item.append(el('span','club-rank-num',String(entry.rank).padStart(2,'0')),memberAvatar(entry.userId,entry.username,'club-rank-avatar'),el('span','club-rank-name',entry.username),el('strong','club-rank-score',`${entry.score} 分`));list.append(item);}
-    content.append(el('div','club-my-rank',user?(data.self?`你的排名：第 ${data.self.rank} 名 · ${data.self.score} 分`:'你还未在这款游戏上榜，完成一局后自动提交。'):'游客可以看榜；注册登录后才能上榜。'));
+    for(const entry of data.entries){const item=el('li','club-rank');item.append(el('span','club-rank-num',String(entry.rank).padStart(2,'0')),memberAvatar(entry.userId,entry.username,'club-rank-avatar'),el('span','club-rank-name',entry.username),el('strong','club-rank-score',rankGame==='match'?`${entry.score} 胜`:`${entry.score} 分`));list.append(item);}
+    content.append(el('div','club-my-rank',user?(data.self?`你的排名：第 ${data.self.rank} 名 · ${data.self.score} ${rankGame==='match'?'胜':'分'}`:rankGame==='match'?'还没有匹配胜场；赢下一局后会自动上榜。':'你还未在这款游戏上榜，完成一局后自动提交。'):'游客可以看榜；注册登录后才能上榜。'));
   }catch(error){list.replaceChildren(notice(friendlyError(error)));}
 }
 async function prepareAvatar(file){
@@ -156,6 +156,10 @@ async function profile(content){
   avatarControls.append(avatarForm);avatarPanel.append(currentAvatar,avatarControls);content.append(avatarPanel);
   try{const {profile}=await request('/api/profile');facts.append(el('dt','','注册时间'),el('dd','',beijingTime(profile.createdAt,'full')));}
   catch(error){overview.append(notice(friendlyError(error)));}
+  const matchRecord=el('div','profile-match-record');matchRecord.append(el('h3','','快速匹配战绩'));
+  const recordValues=el('div','profile-match-values');matchRecord.append(recordValues);overview.append(matchRecord);
+  try{const {stats}=await request('/api/match/stats');for(const [label,value] of [['胜利',stats.wins],['失败',stats.losses],['平局',stats.draws],['胜率',`${stats.winRate}%`]]){const item=el('div','profile-match-value');item.append(el('strong','',String(value)),el('span','',label));recordValues.append(item);}}
+  catch(error){matchRecord.append(notice(friendlyError(error)));}
   const settings=el('section','profile-settings');settings.append(el('span','profile-section-kicker','账号设置'),el('h2','','账号与安全'),el('p','profile-settings-intro','选择一项修改；保存时需填写当前密码。'));
   const tabs=el('div','profile-settings-tabs');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','账号设置');
   const grid=el('div','profile-grid');settings.append(tabs,grid);content.append(settings);

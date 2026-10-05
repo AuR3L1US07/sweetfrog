@@ -1,6 +1,7 @@
 import { iconSvg } from './icons.js';
 
 const names={tap:'逮住大青蛙',merge:'合成大青蛙',flap:'青蛙起飞',puzzle:'青蛙2048',aim:'青蛙定位练习'};
+const choices={random:'随机匹配',...names};
 const page=document.createElement('main');page.id='match-page';page.hidden=true;
 page.innerHTML='<nav class="club-breadcrumb" aria-label="当前位置"><a href="#games">← 游戏大厅</a><span>快速匹配</span></nav><div id="match-content"></div>';
 document.querySelector('#game-screen').before(page);
@@ -37,7 +38,7 @@ async function ensureGuestSession(){
 }
 async function presence(){
   if(document.hidden)return;
-  try{await ensureGuestSession();const data=await api('presence',{method:'POST',body:{visitorId,game:page.hidden?null:selected}});updateCounts(data);}catch{}
+  try{await ensureGuestSession();const data=await api('presence',{method:'POST',body:{visitorId,game:page.hidden||selected==='random'?null:selected}});updateCounts(data);}catch{}
 }
 function updateCounts(data){
   latestCounts=data;const total=document.querySelector('#online-total');if(total)total.textContent=String(data.total);
@@ -53,15 +54,15 @@ function setMessage(value){const node=content.querySelector('#match-message');if
 function choose(game){
   if(queue||requesting)return;selected=game;
   for(const card of content.querySelectorAll('[data-match-game]')){const active=card.dataset.matchGame===game;card.classList.toggle('selected',active);card.setAttribute('aria-pressed',String(active));}
-  const button=content.querySelector('#match-start');if(button)button.textContent=`匹配「${names[game]}」对手 →`;
+  const button=content.querySelector('#match-start');if(button)button.textContent=game==='random'?'开始随机匹配 →':`匹配「${names[game]}」对手 →`;
   presence();
 }
 function showSearching(){
   const panel=content.querySelector('#match-searching');if(!panel)return;
   const wasHidden=panel.hidden;
   panel.hidden=false;content.querySelector('#match-modes').hidden=true;content.querySelector('#match-start').hidden=true;
-  panel.querySelector('.match-search-title').textContent=`正在寻找「${names[queue.game]}」对手`;
-  panel.querySelector('.match-search-sub').textContent='找到玩家后会自动进入同一场对局。';
+  panel.querySelector('.match-search-title').textContent=queue.mode==='random'?`随机匹配中 · 当前候选「${names[queue.game]}」`:`正在寻找「${names[queue.game]}」对手`;
+  panel.querySelector('.match-search-sub').textContent=queue.mode==='random'?'有其他模式的玩家加入时，也可能切换到他们的游戏。':'找到玩家后会自动进入同一场对局。';
   page.querySelector('#match-found').hidden=true;
   if(wasHidden)requestAnimationFrame(()=>panel.scrollIntoView({block:'center',behavior:'instant'}));
 }
@@ -119,9 +120,10 @@ function render(){
   const head=make('div','club-heading');head.innerHTML='<span class="eyebrow">QUICK MATCH</span><h1>快速匹配</h1><p>选一款游戏，找到同场对手。游客也能直接开局；登录后可登上排行榜。</p>';
   const stats=make('div','match-summary');stats.innerHTML=`<span class="match-summary-icon">${iconSvg('people')}</span><span>大厅在线 <strong id="match-total">—</strong> 人</span><small>约 1 分钟内活跃</small><a class="match-online-link" href="#online">看看谁在线 →</a>`;
   const modes=make('div','match-modes');modes.id='match-modes';
-  for(const [game,name] of Object.entries(names)){
+  for(const [game,name] of Object.entries(choices)){
     const button=make('button','match-mode');button.type='button';button.dataset.matchGame=game;
-    button.innerHTML=`<span class="match-mode-icon">${iconSvg(game==='aim'?'target':game==='tap'?'frog':game==='merge'?'add':game==='flap'?'stars':'match')}</span><strong>${name}</strong><span class="match-mode-online"><i></i><strong>0</strong> 人在此模式</span><span class="match-mode-waiting"><strong>0</strong> 人正在匹配</span>`;
+    button.innerHTML=game==='random'?`<span class="match-mode-icon">${iconSvg('stars')}</span><strong>${name}</strong><span class="match-mode-online">优先加入已有玩家等待的游戏</span><span class="match-mode-waiting">无人等待时随机选一款开局</span>`:`<span class="match-mode-icon">${iconSvg(game==='aim'?'target':game==='tap'?'frog':game==='merge'?'add':game==='flap'?'stars':'match')}</span><strong>${name}</strong><span class="match-mode-online"><i></i><strong>0</strong> 人在此模式</span><span class="match-mode-waiting"><strong>0</strong> 人正在匹配</span>`;
+    if(game==='random')button.classList.add('match-mode-random');
     button.addEventListener('click',()=>choose(game));modes.append(button);
   }
   const searching=make('section','match-searching');searching.id='match-searching';searching.hidden=true;

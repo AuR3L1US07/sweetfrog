@@ -63,7 +63,7 @@ try {
   await guestPage.screenshot({path:'tests/pk-mobile-preview.png',fullPage:true});
   await hostPage.locator('.pk-row:last-child .pk-cell.face').click();
   await hostPage.getByText('1',{exact:true}).first().waitFor();
-  await hostPage.evaluate(()=>{for(let index=0;index<19;index++)document.querySelector('.pk-row:last-child .pk-cell.face').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));});
+  await hostPage.evaluate(async()=>{for(let index=0;index<19;index++){await new Promise(resolve=>setTimeout(resolve,100));document.querySelector('.pk-row:last-child .pk-cell.face').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));}});
   await hostPage.waitForFunction(()=>document.querySelector('.pk-player.is-self .pk-player-score')?.textContent==='20');
   await guestPage.waitForFunction(()=>document.querySelector('.pk-player-score')?.textContent==='20',{timeout:10000});
   await guestPage.reload();

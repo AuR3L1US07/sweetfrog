@@ -82,11 +82,12 @@ try{
   assert.equal(await guestPage.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   const touristPage=await browser.newPage({viewport:{width:390,height:850}});touristPage.on('pageerror',error=>errors.push(error.message));
   await touristPage.goto(base+'/#match');
-  await touristPage.getByRole('button',{name:'匹配「逮住大青蛙」对手 →'}).waitFor({state:'visible'});
+  await touristPage.locator('[data-match-game="random"]').click();
+  await touristPage.getByRole('button',{name:'开始随机匹配 →'}).waitFor({state:'visible'});
   await touristPage.waitForFunction(()=>!document.querySelector('#match-start').disabled);
   const tourist=await touristPage.evaluate(async()=>{const token=localStorage.getItem('sweetfrog-guest-session');const response=await fetch('/api/session',{headers:{Authorization:`Bearer ${token}`}});return (await response.json()).user;});
   assert.match(tourist.username,/^游客\d{5}$/);assert.equal(tourist.role,'guest');
-  await touristPage.getByRole('button',{name:'匹配「逮住大青蛙」对手 →'}).click();
+  await touristPage.getByRole('button',{name:'开始随机匹配 →'}).click();
   await touristPage.locator('#match-searching').waitFor({state:'visible'});
   await hostPage.goto(base+'/#match');await hostPage.getByRole('button',{name:'匹配「逮住大青蛙」对手 →'}).click();
   await hostPage.locator('#match-found').waitFor({state:'visible',timeout:10000});
@@ -99,6 +100,17 @@ try{
   await hostPage.locator('#account-popover').getByRole('button',{name:'退出登录'}).click();
   await hostPage.waitForURL('**/#account');
   assert.equal(await hostPage.locator('#account-chip').getByText('登录').count(),1);
+  const tapPage=await browser.newPage();tapPage.on('pageerror',error=>errors.push(error.message));
+  await tapPage.goto(base+'/#tap');await tapPage.locator('#start-button').click();
+  await tapPage.locator('.tap-row:last-child .face').waitFor();
+  for(const key of ['d','f','j','k'])await tapPage.keyboard.down(key);
+  const chordScore=Number(await tapPage.locator('#score').textContent());assert.ok(chordScore<=1,'one held key chord may count at most once');
+  for(const key of ['d','f','j','k'])await tapPage.keyboard.up(key);
+  await tapPage.waitForTimeout(110);
+  const targetKey=await tapPage.locator('.tap-row:last-child .face').getAttribute('data-col');
+  await tapPage.keyboard.press(['d','f','j','k'][Number(targetKey)]);
+  assert.equal(Number(await tapPage.locator('#score').textContent()),chordScore+1);
+  await tapPage.close();
   assert.deepEqual(errors,[]);
   console.log('PASS: signed-in and guest matchmaking, five-digit guest name, shared PK room and mobile layout');
 }finally{

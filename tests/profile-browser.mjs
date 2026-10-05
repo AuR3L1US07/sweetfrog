@@ -23,6 +23,8 @@ try{
     const page=await browser.newPage({viewport});const errors=[];page.on('pageerror',error=>errors.push(error.message));
     await page.addInitScript(value=>localStorage.setItem('sweetfrog-session',value),member.token);
     await page.goto(base+'/#profile');await page.getByRole('heading',{name:'账号与安全'}).waitFor();
+    await page.waitForFunction(()=>document.querySelectorAll('.profile-match-value').length===4);
+    assert.match(await page.locator('.profile-match-record').textContent(),/胜率/);
     await page.locator('.profile-facts dd').nth(2).waitFor();
     assert.equal(await page.locator('.profile-facts dt').allTextContents().then(values=>values.join(',')),'玩家 ID,账号身份,注册时间');
     assert.doesNotMatch(await page.locator('.profile-facts').textContent(),/北京时间/);

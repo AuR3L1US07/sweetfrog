@@ -74,6 +74,14 @@ export async function handleApi(request, env) {
     const suggestions = () => all(`SELECT s.id,s.title,s.body,s.created_at AS createdAt,u.username,u.id AS userId,(SELECT count(*) FROM suggestion_votes v WHERE v.suggestion_id=s.id) AS votes,EXISTS(SELECT 1 FROM suggestion_votes v WHERE v.suggestion_id=s.id AND v.user_id=?) AS voted FROM suggestions s JOIN users u ON u.id=s.user_id ORDER BY votes DESC,s.created_at DESC,s.id DESC LIMIT 100`, user?.id || -1);
     const topics = () => all(`SELECT t.id,t.title,t.body,t.created_at AS createdAt,u.username,u.id AS userId,(SELECT count(*) FROM replies r WHERE r.topic_id=t.id) AS replyCount FROM topics t JOIN users u ON u.id=t.user_id ORDER BY t.created_at DESC,t.id DESC LIMIT 100`);
     async function rank(game) {
+      if(game==='match'){
+        await finalizeMatches();
+        const entries=await all("SELECT u.username,u.id AS userId,count(*) AS score FROM match_results r JOIN users u ON u.id=r.winner_id WHERE u.role<>'guest' AND u.banned=0 GROUP BY r.winner_id ORDER BY score DESC,min(r.finished_at),u.id LIMIT 30");
+        let last=null,place=0;entries.forEach((entry,index)=>{if(entry.score!==last)place=index+1;last=entry.score;entry.rank=place;});
+        const own=user&&user.role!=='guest'?await first('SELECT count(*) AS score FROM match_results WHERE winner_id=?',user.id):null;
+        const self=own?.score?{score:own.score,rank:(await first("SELECT count(*) AS n FROM (SELECT r.winner_id FROM match_results r JOIN users u ON u.id=r.winner_id WHERE u.role<>'guest' AND u.banned=0 GROUP BY r.winner_id HAVING count(*)>?)",own.score)).n+1}:null;
+        return {entries,self};
+      }
       const entries = await all('SELECT u.username,u.id AS userId,s.score FROM scores s JOIN users u ON u.id=s.user_id WHERE s.game=? ORDER BY s.score DESC,s.updated_at ASC,s.user_id ASC LIMIT 30', game);
       let last = null, place = 0;
       entries.forEach((entry,index) => { if (entry.score !== last) place=index+1; last=entry.score; entry.rank=place; });
@@ -82,6 +90,14 @@ export async function handleApi(request, env) {
       return { entries, self };
     }
     const matchGames=['tap','merge','flap','puzzle','aim'];
+    async function finalizeMatches(){
+      await run('INSERT OR IGNORE INTO match_results(room_code,round,host_id,guest_id,winner_id,finished_at) SELECT code,round,host_id,guest_id,CASE WHEN host_score=guest_score THEN NULL WHEN host_score>guest_score THEN host_id ELSE guest_id END,starts_at+? FROM pk_rooms WHERE is_match=1 AND guest_id IS NOT NULL AND starts_at IS NOT NULL AND starts_at+?<=?',PK_DURATION_MS,PK_DURATION_MS+1200,Date.now());
+    }
+    async function matchStats(playerId){
+      await finalizeMatches();
+      const row=await first('SELECT count(*) AS played,coalesce(sum(winner_id=?),0) AS wins,coalesce(sum(winner_id IS NOT NULL AND winner_id<>?),0) AS losses,coalesce(sum(winner_id IS NULL),0) AS draws FROM match_results WHERE host_id=? OR guest_id=?',playerId,playerId,playerId,playerId);
+      return {...row,winRate:row.played?Math.round(row.wins/row.played*100):0};
+    }
     async function presenceState(){
       const cutoff=Date.now()-70000,queueCutoff=Date.now()-16000;
       const total=(await first('SELECT count(*) AS n FROM online_presence WHERE last_seen>=?',cutoff)).n;
@@ -99,25 +115,26 @@ export async function handleApi(request, env) {
       return {total:guests+registered,guests,registered,players,remaining:Math.max(0,guests+registered-players.length)};
     }
     async function queueState(){
-      const row=await first('SELECT game,status,room_code FROM match_queue WHERE user_id=?',user.id);
-      return row?{game:row.game,status:row.status,roomCode:row.room_code}:null;
+      const row=await first('SELECT game,mode,status,room_code FROM match_queue WHERE user_id=?',user.id);
+      return row?{game:row.game,mode:row.mode,status:row.status,roomCode:row.room_code}:null;
     }
     async function findMatch(){
       const now=Date.now();
       await run("UPDATE match_queue SET status='waiting' WHERE status='matching' AND last_seen<? AND room_code IS NULL",now-6000);
-      const mine=await first("UPDATE match_queue SET status='matching',last_seen=? WHERE user_id=? AND status='waiting' RETURNING game,joined_at",now,user.id);
+      const mine=await first("UPDATE match_queue SET status='matching',last_seen=? WHERE user_id=? AND status='waiting' RETURNING game,mode,joined_at",now,user.id);
       if(!mine)return queueState();
-      const other=await first("UPDATE match_queue SET status='matching' WHERE user_id=(SELECT q.user_id FROM match_queue q JOIN users u ON u.id=q.user_id WHERE q.game=? AND q.status='waiting' AND q.last_seen>=? AND u.banned=0 AND (q.joined_at<? OR (q.joined_at=? AND q.user_id<?)) ORDER BY q.joined_at,q.user_id LIMIT 1) AND status='waiting' RETURNING user_id",mine.game,now-16000,mine.joined_at,mine.joined_at,user.id);
+      const other=await first("UPDATE match_queue SET status='matching' WHERE user_id=(SELECT q.user_id FROM match_queue q JOIN users u ON u.id=q.user_id WHERE (q.game=? OR q.mode='random' OR ?='random') AND q.status='waiting' AND q.last_seen>=? AND u.banned=0 AND (q.joined_at<? OR (q.joined_at=? AND q.user_id<?)) ORDER BY q.joined_at,q.user_id LIMIT 1) AND status='waiting' RETURNING user_id,game,mode",mine.game,mine.mode,now-16000,mine.joined_at,mine.joined_at,user.id);
       if(!other){await run("UPDATE match_queue SET status='waiting' WHERE user_id=? AND status='matching'",user.id);return queueState();}
+      const game=mine.mode==='fixed'?mine.game:other.mode==='fixed'?other.game:other.game;
       const alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
       try{
         for(let attempt=0;attempt<5;attempt++){
           const code=Array.from(crypto.getRandomValues(new Uint8Array(6)),value=>alphabet[value%alphabet.length]).join('');
           try{
             await db.batch([
-              statement('INSERT INTO pk_rooms(code,host_id,guest_id,game,host_ready,guest_ready,seed,starts_at,created_at) VALUES(?,?,?,?,1,1,?,?,?)',[code,other.user_id,user.id,mine.game,crypto.getRandomValues(new Uint32Array(1))[0],now+7000,now]),
-              statement("UPDATE match_queue SET status='matched',room_code=? WHERE user_id=? AND status='matching'",[code,other.user_id]),
-              statement("UPDATE match_queue SET status='matched',room_code=? WHERE user_id=? AND status='matching'",[code,user.id])
+              statement('INSERT INTO pk_rooms(code,host_id,guest_id,game,is_match,host_ready,guest_ready,seed,starts_at,created_at) VALUES(?,?,?,?,1,1,1,?,?,?)',[code,other.user_id,user.id,game,crypto.getRandomValues(new Uint32Array(1))[0],now+7000,now]),
+              statement("UPDATE match_queue SET game=?,status='matched',room_code=? WHERE user_id=? AND status='matching'",[game,code,other.user_id]),
+              statement("UPDATE match_queue SET game=?,status='matched',room_code=? WHERE user_id=? AND status='matching'",[game,code,user.id])
             ]);
             return queueState();
           }catch(error){if(!String(error).includes('UNIQUE'))throw error;}
@@ -256,12 +273,15 @@ export async function handleApi(request, env) {
     if(path==='/api/match/queue'){
       requireParticipant();const now=Date.now();
       if(method==='POST'){
-        const game=(await body(request)).game;if(!matchGames.includes(game))fail(400,'请选择对战游戏');await rate(`match-join:${user.id}`,30);
+        const requested=(await body(request)).game;if(requested!=='random'&&!matchGames.includes(requested))fail(400,'请选择对战游戏');await rate(`match-join:${user.id}`,30);
+        const mode=requested==='random'?'random':'fixed';
         const existing=await queueState();
         if(existing?.status==='matched'||existing?.status==='matching')return json({queue:existing});
-        if(existing?.status==='waiting'&&existing.game===game)return json({queue:await findMatch()});
+        if(existing?.status==='waiting'&&existing.mode===mode&&(mode==='random'||existing.game===requested))return json({queue:await findMatch()});
+        const waiting=mode==='random'?await first("SELECT game FROM match_queue WHERE user_id<>? AND status='waiting' AND last_seen>=? ORDER BY joined_at,user_id LIMIT 1",user.id,now-16000):null;
+        const game=mode==='random'?(waiting?.game||matchGames[crypto.getRandomValues(new Uint32Array(1))[0]%matchGames.length]):requested;
         await run('DELETE FROM match_queue WHERE last_seen<?',now-86400000);
-        await run('INSERT INTO match_queue(user_id,game,status,joined_at,last_seen,room_code) VALUES(?,?,\'waiting\',?,?,NULL) ON CONFLICT(user_id) DO UPDATE SET game=excluded.game,status=\'waiting\',joined_at=excluded.joined_at,last_seen=excluded.last_seen,room_code=NULL',user.id,game,now,now);
+        await run("INSERT INTO match_queue(user_id,game,mode,status,joined_at,last_seen,room_code) VALUES(?,?,?,'waiting',?,?,NULL) ON CONFLICT(user_id) DO UPDATE SET game=excluded.game,mode=excluded.mode,status='waiting',joined_at=excluded.joined_at,last_seen=excluded.last_seen,room_code=NULL",user.id,game,mode,now,now);
         return json({queue:await findMatch()});
       }
       if(method==='GET'){
@@ -323,6 +343,7 @@ export async function handleApi(request, env) {
       requireUser();
       if (method==='GET') return json({profile:await first('SELECT id,public_id AS publicId,username,role,created_at AS createdAt FROM users WHERE id=?',user.id)});
     }
+    if(path==='/api/match/stats'&&method==='GET'){requireUser();return json({stats:await matchStats(user.id)});}
     if (method==='POST' && path==='/api/profile/avatar') {
       requireUser(); await rate(`avatar:${user.id}`,12);
       const data=await body(request,90000),avatar=data.avatarData;
@@ -364,7 +385,7 @@ export async function handleApi(request, env) {
       requireUser();await rate(`pk-create:${user.id}`,12);
       const game=(await body(request)).game || 'tap';
       if(!['tap','merge','flap','puzzle','aim'].includes(game))fail(400,'请选择支持的游戏');
-      await run('DELETE FROM pk_rooms WHERE created_at<?',Date.now()-30*86400000);
+      await finalizeMatches();await run('DELETE FROM pk_rooms WHERE created_at<?',Date.now()-30*86400000);
       const alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
       for(let attempt=0;attempt<5;attempt++){
         const code=Array.from(crypto.getRandomValues(new Uint8Array(6)),value=>alphabet[value%alphabet.length]).join('');
@@ -386,7 +407,7 @@ export async function handleApi(request, env) {
         return json({room:roomState(await getRoom(code))});
       }
       if(user.id!==room.host_id&&user.id!==room.guest_id)fail(404,'房间不存在或已过期');
-      if(!action&&method==='GET')return json({room:roomState(room)});
+      if(!action&&method==='GET'){if(room.is_match&&room.starts_at&&Date.now()>=room.starts_at+PK_DURATION_MS+1200)await finalizeMatches();return json({room:roomState(room)});}
       if(action==='ready'&&method==='POST'){
         if(!room.guest_id)fail(409,'等待朋友加入房间');
         if(room.starts_at)fail(409,'本局已经开始');
@@ -400,6 +421,7 @@ export async function handleApi(request, env) {
         const decision=(await body(request)).decision,now=Date.now();
         if(!['request','accept','cancel'].includes(decision))fail(400,'请选择有效操作');
         if(!room.guest_id||!room.starts_at||now<room.starts_at+PK_DURATION_MS+1200)fail(409,'请等待本局成绩结算');
+        if(room.is_match)await finalizeMatches();
         let result;
         if(decision==='request'){
           result=await run('UPDATE pk_rooms SET rematch_by=?,revision=revision+1 WHERE code=? AND round=? AND rematch_by IS NULL AND starts_at+?<=?',user.id,code,room.round,PK_DURATION_MS+1200,now);
@@ -427,6 +449,7 @@ export async function handleApi(request, env) {
         const current=room[scoreColumn];
         if(step!==current)fail(409,'成绩已更新，请同步房间');
         if(!pkValidBatch(room.seed,current,cols))return json({correct:false,room:roomState(room)});
+        if(cols.length*55>now-Math.max(room.starts_at,room[lastColumn]||room.starts_at)+250)fail(429,'点击过快，请稍微放慢节奏');
         const result=await run(`UPDATE pk_rooms SET ${scoreColumn}=${scoreColumn}+?,${lastColumn}=? WHERE code=? AND round=? AND ${scoreColumn}=? AND starts_at<=? AND starts_at+? >=?`,cols.length,now,code,round,current,now,PK_DURATION_MS+1200,now);
         if(!result.meta.changes)fail(409,'成绩已更新，请同步房间');
         room=await getRoom(code);
@@ -484,9 +507,10 @@ export async function handleApi(request, env) {
       await run('INSERT INTO replies(topic_id,user_id,body) VALUES(?,?,?)',Number(replies[1]),user.id,content);
       return json({ok:true},201);
     }
-    const leader=/^\/api\/leaderboards\/(tap|merge|flap|puzzle|aim)$/.exec(path);
+    const leader=/^\/api\/leaderboards\/(match|tap|merge|flap|puzzle|aim)$/.exec(path);
     if (leader && method==='GET') return json(await rank(leader[1]));
     if (leader && method==='POST') {
+      if(leader[1]==='match')fail(405,'匹配胜场由服务器在对局结束后记录');
       requireUser(); const score=(await body(request)).score;
       if (!Number.isSafeInteger(score) || score<0 || score>10000000) fail(400,'成绩无效');
       await run(`INSERT INTO scores(user_id,game,score) VALUES(?,?,?) ON CONFLICT(user_id,game) DO UPDATE SET score=excluded.score,updated_at=CURRENT_TIMESTAMP WHERE excluded.score>scores.score`,user.id,leader[1],score);

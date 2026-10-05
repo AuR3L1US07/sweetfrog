@@ -12,6 +12,12 @@
 .profile-overview{padding:23px 26px;margin-bottom:16px}
 .profile-overview h2{margin:6px 0 12px;font-size:30px}
 .profile-facts{grid-template-columns:90px 1fr;padding:12px 0}
+.profile-match-record{margin-top:17px}
+.profile-match-record h3{margin:0 0 10px;color:#2d6954;font:400 19px "Sweet Round",sans-serif}
+.profile-match-values{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.profile-match-value{display:flex;flex-direction:column;gap:2px;padding:12px 13px;border:1px solid #d9ebde;border-radius:13px;background:#ffffffa6;color:#668071;font-size:11px}
+.profile-match-value strong{color:#276b53;font:900 21px "Sweet Nunito",sans-serif;font-variant-numeric:tabular-nums}
+@media(max-width:650px){.profile-match-values{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .profile-created{margin-top:10px!important}
 .profile-avatar-panel{gap:22px;min-height:146px;margin-bottom:16px;padding:20px 25px}
 .profile-avatar{width:98px;height:98px;border-radius:24px}

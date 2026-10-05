@@ -1,5 +1,5 @@
 import { PK_DURATION_MS, pkRows } from './pk-core.js';
-import { launchPkGame, stopPkGame } from './app.js?v=20261004-pk4';
+import { launchPkGame, stopPkGame } from './app.js?v=20261005-random-match';
 import { iconSvg } from './icons.js';
 
 const games={tap:'逮住大青蛙',merge:'合成大青蛙',flap:'青蛙起飞',puzzle:'青蛙2048',aim:'青蛙定位练习'};
@@ -22,6 +22,7 @@ let routeId = 0, pollTimer = 0, tickTimer = 0, polling = false, clockOffset = 0;
 let viewCode = '', errorMessage = '';
 let pkLaunched=false,pkResultShown=false,scoreSeq=0,latestScore=null,scoreTimer=0,scoreSending=false,pendingScores=0;
 let resultAnnouncedRound=0,focusedRound=0,rematchBusy=false;
+let lastTapAttempt=0;const heldPkKeys=new Set();
 let inviteListAt=0;
 const token = () => { try { return localStorage.getItem('sweetfrog-session') || localStorage.getItem('sweetfrog-guest-session') || ''; } catch { return ''; } };
 const now = () => Date.now() - clockOffset;
@@ -279,7 +280,8 @@ async function poll() {
   finally{polling=false;}
 }
 function hit(col) {
-  if(!room||phaseFor(room)!=='playing'||localScore===null)return;
+  if(!room||phaseFor(room)!=='playing'||localScore===null||performance.now()-lastTapAttempt<85)return;
+  lastTapAttempt=performance.now();
   const rows=pkRows(room.seed,localScore);
   if(rows[4]!==col){const board=content.querySelector('#pk-board');board.classList.remove('miss');void board.offsetWidth;board.classList.add('miss');window.dispatchEvent(new CustomEvent('sweetfrog:pk-hit',{detail:{correct:false}}));return;}
   localScore++;pendingHits++;hitBuffer.push(col);renderBoard();
@@ -289,7 +291,7 @@ function hit(col) {
 }
 async function route() {
   const match=/^pk(?:\/([A-HJ-NP-Z2-9]{6}))?$/.exec(location.hash.slice(1).toUpperCase().replace(/^PK/,'pk'));
-  const id=++routeId;stopTimers();stopPkGame();room=null;viewCode='';page.hidden=!match;nav.classList.toggle('active',Boolean(match));
+  const id=++routeId;heldPkKeys.clear();lastTapAttempt=0;stopTimers();stopPkGame();room=null;viewCode='';page.hidden=!match;nav.classList.toggle('active',Boolean(match));
   if(!match)return;
   document.querySelector('#lobby').hidden=true;document.querySelector('#game-screen').hidden=true;
   document.querySelector('#club-page').hidden=true;
@@ -305,5 +307,6 @@ async function route() {
   pollTimer=setInterval(poll,800);tickTimer=setInterval(tick,100);
 }
 window.addEventListener('hashchange',route);
-window.addEventListener('keydown',event=>{if(page.hidden||!room||event.repeat||/INPUT|TEXTAREA/.test(document.activeElement?.tagName))return;const col=['d','f','j','k'].indexOf(event.key.toLowerCase());if(col>=0){event.preventDefault();hit(col);}});
+window.addEventListener('keyup',event=>heldPkKeys.delete(event.key.toLowerCase()));window.addEventListener('blur',()=>heldPkKeys.clear());
+window.addEventListener('keydown',event=>{if(page.hidden||!room||event.repeat||/INPUT|TEXTAREA/.test(document.activeElement?.tagName))return;const key=event.key.toLowerCase(),col=['d','f','j','k'].indexOf(key);if(col>=0){event.preventDefault();const first=heldPkKeys.size===0;heldPkKeys.add(key);if(first)hit(col);}});
 route();
