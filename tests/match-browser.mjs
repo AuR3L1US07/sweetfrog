@@ -66,8 +66,23 @@ try{
   await hostPage.locator('#pk-game').waitFor({state:'visible',timeout:12000});
   await guestPage.locator('#pk-game').waitFor({state:'visible',timeout:12000});
   assert.equal(await guestPage.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  const touristPage=await browser.newPage({viewport:{width:390,height:850}});touristPage.on('pageerror',error=>errors.push(error.message));
+  await touristPage.goto(base+'/#match');
+  await touristPage.getByRole('button',{name:'匹配「逮住大青蛙」对手 →'}).waitFor({state:'visible'});
+  await touristPage.waitForFunction(()=>!document.querySelector('#match-start').disabled);
+  const tourist=await touristPage.evaluate(async()=>{const token=localStorage.getItem('sweetfrog-guest-session');const response=await fetch('/api/session',{headers:{Authorization:`Bearer ${token}`}});return (await response.json()).user;});
+  assert.match(tourist.username,/^游客\d{5}$/);assert.equal(tourist.role,'guest');
+  await touristPage.getByRole('button',{name:'匹配「逮住大青蛙」对手 →'}).click();
+  await touristPage.locator('#match-searching').waitFor({state:'visible'});
+  await hostPage.goto(base+'/#match');await hostPage.getByRole('button',{name:'匹配「逮住大青蛙」对手 →'}).click();
+  await hostPage.locator('#match-found').waitFor({state:'visible',timeout:10000});
+  await hostPage.waitForFunction(name=>document.querySelector('.match-duel-opponent strong')?.textContent===name,tourist.username);
+  await touristPage.waitForURL('**/#pk/*',{timeout:10000});
+  await touristPage.locator('#pk-game').waitFor({state:'visible',timeout:12000});
+  assert.equal(await touristPage.locator('.pk-player-name').getByText(tourist.username).count(),1);
+  await touristPage.close();
   assert.deepEqual(errors,[]);
-  console.log('PASS: online count, unified icons, per-mode waiting count, two-browser matching animation and shared PK room');
+  console.log('PASS: signed-in and guest matchmaking, five-digit guest name, shared PK room and mobile layout');
 }finally{
   await browser?.close();
   if(server){const stopped=new Promise(resolve=>server.once('exit',resolve));server.kill();await stopped;}

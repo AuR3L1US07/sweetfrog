@@ -56,7 +56,8 @@ export async function handleApi(request, env) {
     if (method !== 'GET' && origin && origin !== new URL(request.url).origin) fail(403, '请求来源不允许');
     const token = /^Bearer ([a-f0-9]{64})$/.exec(request.headers.get('authorization') || '')?.[1];
     const user = token ? await first('SELECT u.id,u.public_id AS publicId,u.username,u.role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>? AND u.banned=0', await digest(token), Date.now()) : null;
-    const requireUser = () => { if (!user) fail(401, '请先登录'); };
+    const requireParticipant = () => { if (!user) fail(401, '请先登录或以游客身份进入匹配'); };
+    const requireUser = () => { if (!user || user.role==='guest') fail(401, '请先登录'); };
     async function rate(scope, limit) {
       const key = await digest(scope), now = Date.now();
       const result = await first(`INSERT INTO auth_attempts(ip_hash,count,until) VALUES(?,1,?) ON CONFLICT(ip_hash) DO UPDATE SET count=CASE WHEN auth_attempts.until<=? THEN 1 ELSE auth_attempts.count+1 END,until=CASE WHEN auth_attempts.until<=? THEN excluded.until ELSE auth_attempts.until END RETURNING count`, key, now + 3600000, now, now);
@@ -66,9 +67,9 @@ export async function handleApi(request, env) {
       const value = random(32);
       await db.batch([
         statement('DELETE FROM sessions WHERE user_id=? AND expires_at<=?', [account.id, Date.now()]),
-        statement('INSERT INTO sessions(token_hash,user_id,expires_at) VALUES(?,?,?)', [await digest(value), account.id, Date.now()+30*86400000])
+        statement('INSERT INTO sessions(token_hash,user_id,expires_at) VALUES(?,?,?)', [await digest(value), account.id, Date.now()+(account.role==='guest'?86400000:30*86400000)])
       ]);
-      return json({ token:value, user:{ id:account.id, publicId:account.publicId, username:account.username, role:account.role || 'player' } });
+      return json({ token:value, user:{ id:account.id, publicId:account.publicId??account.public_id, username:account.username, role:account.role || 'player' } });
     }
     const suggestions = () => all(`SELECT s.id,s.title,s.body,s.created_at AS createdAt,u.username,u.id AS userId,(SELECT count(*) FROM suggestion_votes v WHERE v.suggestion_id=s.id) AS votes,EXISTS(SELECT 1 FROM suggestion_votes v WHERE v.suggestion_id=s.id AND v.user_id=?) AS voted FROM suggestions s JOIN users u ON u.id=s.user_id ORDER BY votes DESC,s.created_at DESC,s.id DESC LIMIT 100`, user?.id || -1);
     const topics = () => all(`SELECT t.id,t.title,t.body,t.created_at AS createdAt,u.username,u.id AS userId,(SELECT count(*) FROM replies r WHERE r.topic_id=t.id) AS replyCount FROM topics t JOIN users u ON u.id=t.user_id ORDER BY t.created_at DESC,t.id DESC LIMIT 100`);
@@ -93,8 +94,8 @@ export async function handleApi(request, env) {
     async function onlinePlayers(){
       const cutoff=Date.now()-70000;
       const guests=(await first('SELECT count(*) AS n FROM online_presence WHERE last_seen>=? AND user_id IS NULL',cutoff)).n;
-      const registered=(await first('SELECT count(*) AS n FROM online_presence p JOIN users u ON u.id=p.user_id WHERE p.last_seen>=? AND u.banned=0',cutoff)).n;
-      const players=await all('SELECT u.id,u.public_id AS publicId,u.username,p.game FROM online_presence p JOIN users u ON u.id=p.user_id WHERE p.last_seen>=? AND u.banned=0 ORDER BY p.last_seen DESC,u.id LIMIT 100',cutoff);
+      const registered=(await first("SELECT count(*) AS n FROM online_presence p JOIN users u ON u.id=p.user_id WHERE p.last_seen>=? AND u.banned=0 AND u.role<>'guest'",cutoff)).n;
+      const players=await all("SELECT u.id,u.public_id AS publicId,u.username,p.game FROM online_presence p JOIN users u ON u.id=p.user_id WHERE p.last_seen>=? AND u.banned=0 AND u.role<>'guest' ORDER BY p.last_seen DESC,u.id LIMIT 100",cutoff);
       return {total:guests+registered,guests,registered,players,remaining:Math.max(0,registered-players.length)};
     }
     async function queueState(){
@@ -132,10 +133,10 @@ export async function handleApi(request, env) {
     if(path==='/api/presence'&&method==='POST'){
       const data=await body(request),visitorId=data.visitorId,game=data.game||null;
       if(!/^[a-f0-9]{32}$/.test(visitorId)||game!==null&&!matchGames.includes(game))fail(400,'在线状态无效');
-      const key=user?`u:${user.id}`:`g:${visitorId}`,now=Date.now();
+      const member=user&&user.role!=='guest',key=member?`u:${user.id}`:`g:${visitorId}`,now=Date.now();
       await run('DELETE FROM online_presence WHERE last_seen<?',now-86400000);
-      if(user)await run('DELETE FROM online_presence WHERE client_key=?',`g:${visitorId}`);
-      await run('INSERT INTO online_presence(client_key,user_id,game,last_seen) VALUES(?,?,?,?) ON CONFLICT(client_key) DO UPDATE SET game=excluded.game,last_seen=excluded.last_seen',key,user?.id||null,game,now);
+      if(member)await run('DELETE FROM online_presence WHERE client_key=?',`g:${visitorId}`);
+      await run('INSERT INTO online_presence(client_key,user_id,game,last_seen) VALUES(?,?,?,?) ON CONFLICT(client_key) DO UPDATE SET game=excluded.game,last_seen=excluded.last_seen',key,member?user.id:null,game,now);
       return json(await presenceState());
     }
     const friendPair=otherId=>[Math.min(user.id,otherId),Math.max(user.id,otherId)];
@@ -150,14 +151,14 @@ export async function handleApi(request, env) {
       requireUser();await rate(`friend-search:${user.id}`,120);
       const query=text(new URL(request.url).searchParams.get('q'),20);
       if(!query||query.length>20)fail(400,'请输入玩家昵称或 ID');
-      const matches=await all(`SELECT u.id,u.public_id AS publicId,u.username,f.status,f.requester_id AS requesterId FROM users u LEFT JOIN friend_links f ON f.user_low=min(?,u.id) AND f.user_high=max(?,u.id) WHERE u.id<>? AND u.banned=0 AND (u.public_id=? OR instr(lower(u.username),lower(?))=1) ORDER BY CASE WHEN u.public_id=? OR lower(u.username)=lower(?) THEN 0 ELSE 1 END,u.username LIMIT 12`,user.id,user.id,user.id,/^\d{5}$/.test(query)?Number(query):-1,query,/^\d{5}$/.test(query)?Number(query):-1,query);
+      const matches=await all(`SELECT u.id,u.public_id AS publicId,u.username,f.status,f.requester_id AS requesterId FROM users u LEFT JOIN friend_links f ON f.user_low=min(?,u.id) AND f.user_high=max(?,u.id) WHERE u.id<>? AND u.banned=0 AND u.role<>'guest' AND (u.public_id=? OR instr(lower(u.username),lower(?))=1) ORDER BY CASE WHEN u.public_id=? OR lower(u.username)=lower(?) THEN 0 ELSE 1 END,u.username LIMIT 12`,user.id,user.id,user.id,/^\d{5}$/.test(query)?Number(query):-1,query,/^\d{5}$/.test(query)?Number(query):-1,query);
       return json({self:{id:user.id,publicId:user.publicId},players:matches});
     }
     if(path==='/api/friends/requests'&&method==='POST'){
       requireUser();await rate(`friend-request:${user.id}`,30);
       const targetId=(await body(request)).userId;
       if(!Number.isSafeInteger(targetId)||targetId<1||targetId===user.id)fail(400,'请选择其他玩家');
-      if(!await first('SELECT id FROM users WHERE id=? AND banned=0',targetId))fail(404,'玩家不存在');
+      if(!await first("SELECT id FROM users WHERE id=? AND banned=0 AND role<>'guest'",targetId))fail(404,'玩家不存在');
       const [low,high]=friendPair(targetId),now=Date.now();
       const result=await run(`INSERT INTO friend_links(user_low,user_high,requester_id,status,updated_at) VALUES(?,?,?,'pending',?) ON CONFLICT(user_low,user_high) DO UPDATE SET requester_id=excluded.requester_id,status='pending',updated_at=excluded.updated_at WHERE friend_links.status='declined' AND friend_links.updated_at<?`,low,high,user.id,now,now-86400000);
       if(!result.meta.changes)fail(409,'已有好友关系或申请；被拒绝后需等待一天再申请');
@@ -233,8 +234,27 @@ export async function handleApi(request, env) {
       await run("UPDATE pk_invites SET status=CASE WHEN id=? THEN 'accepted' ELSE 'expired' END WHERE room_code=? AND status='pending'",id,invite.room_code);
       return json({ok:true,roomCode:invite.room_code});
     }
+    if(path==='/api/guest/session'&&method==='POST'){
+      if(user?.role==='guest')return json({token,user});
+      if(user)fail(409,'你已经登录玩家账号');
+      await rate(`guest-session:${request.headers.get('CF-Connecting-IP')||'local'}`,30);
+      const expired="SELECT id FROM users WHERE role='guest' AND created_at<datetime('now','-3 days')";
+      await run(`DELETE FROM pk_rooms WHERE host_id IN (${expired}) OR guest_id IN (${expired})`);
+      await run(`DELETE FROM match_queue WHERE user_id IN (${expired})`);
+      await run(`DELETE FROM online_presence WHERE user_id IN (${expired})`);
+      await run(`DELETE FROM sessions WHERE user_id IN (${expired})`);
+      await run("DELETE FROM users WHERE role='guest' AND created_at<datetime('now','-3 days')");
+      for(let attempt=0;attempt<20;attempt++){
+        const publicId=randomPlayerId();
+        try{
+          const guest=await first("INSERT INTO users(public_id,username,password_hash,role) VALUES(?,?,?,'guest') RETURNING id,public_id AS publicId,username,role",publicId,`游客${publicId}`,random(32));
+          return session(guest);
+        }catch(error){if(!String(error).includes('UNIQUE'))throw error;}
+      }
+      fail(503,'暂时无法分配游客编号，请稍后重试');
+    }
     if(path==='/api/match/queue'){
-      requireUser();const now=Date.now();
+      requireParticipant();const now=Date.now();
       if(method==='POST'){
         const game=(await body(request)).game;if(!matchGames.includes(game))fail(400,'请选择对战游戏');await rate(`match-join:${user.id}`,30);
         const existing=await queueState();
@@ -278,6 +298,7 @@ export async function handleApi(request, env) {
       if (typeof password !== 'string' || password.length < 8 || password.length > 128) fail(400,'密码需为 8–128 位');
       if (path === '/api/register') {
         if (!/^[\p{L}\p{N}_]{3,20}$/u.test(username)) fail(400,'昵称需为 3–20 个字母、数字、汉字或下划线');
+        if(/^游客\d{5}$/.test(username))fail(400,'这个昵称为游客专用');
         let account;
         const passwordHash=await hashPassword(password);
         for(let attempt=0;attempt<20&&!account;attempt++){
@@ -353,11 +374,12 @@ export async function handleApi(request, env) {
       fail(503,'创建房间失败，请重试');
     }
     if(roomPath){
-      requireUser();const code=roomPath[1],action=roomPath[2];
+      requireParticipant();const code=roomPath[1],action=roomPath[2];
       let room=await getRoom(code);
       if(!room||room.created_at<Date.now()-86400000)fail(404,'房间不存在或已过期');
       if(action==='join'&&method==='POST'){
         if(user.id!==room.host_id&&user.id!==room.guest_id){
+          if(user.role==='guest')fail(401,'游客只能加入快速匹配的房间');
           const result=await run('UPDATE pk_rooms SET guest_id=? WHERE code=? AND guest_id IS NULL AND host_id<>? AND starts_at IS NULL',user.id,code,user.id);
           if(!result.meta.changes)fail(409,'房间已满或已开始');
         }
@@ -474,12 +496,12 @@ export async function handleApi(request, env) {
       requireUser(); if (user.role!=='admin') fail(403,'没有管理员权限');
       if (method==='GET' && path==='/api/admin/overview') {
         const result={};
-        for (const table of ['users','suggestions','topics','replies','scores']) result[table]=(await first(`SELECT count(*) AS n FROM ${table}`)).n;
+        for (const table of ['users','suggestions','topics','replies','scores']) result[table]=(await first(`SELECT count(*) AS n FROM ${table}${table==='users'?" WHERE role<>'guest'":''}`)).n;
         return json(result);
       }
       if (method==='GET' && path==='/api/admin/suggestions') return json({items:await suggestions()});
       if (method==='GET' && path==='/api/admin/topics') return json({items:await topics()});
-      if (method==='GET' && path==='/api/admin/users') return json({items:await all('SELECT id,public_id AS publicId,username,role,banned,created_at AS createdAt FROM users ORDER BY created_at DESC LIMIT 200')});
+      if (method==='GET' && path==='/api/admin/users') return json({items:await all("SELECT id,public_id AS publicId,username,role,banned,created_at AS createdAt FROM users WHERE role<>'guest' ORDER BY created_at DESC LIMIT 200")});
       const ban=/^\/api\/admin\/users\/(\d+)\/ban$/.exec(path);
       if (ban && method==='POST') {
         const target=await first('SELECT role FROM users WHERE id=?',Number(ban[1]));

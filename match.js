@@ -11,7 +11,7 @@ const nav=document.createElement('a');nav.href='#match';nav.className='club-nav-
 const content=page.querySelector('#match-content');
 const onlineContent=onlinePage.querySelector('#online-content');
 const make=(tag,className,text)=>{const node=document.createElement(tag);node.className=className;if(text!==undefined)node.textContent=text;return node;};
-const token=()=>{try{return localStorage.getItem('sweetfrog-session')||'';}catch{return '';}};
+const token=()=>{try{return localStorage.getItem('sweetfrog-session')||localStorage.getItem('sweetfrog-guest-session')||'';}catch{return '';}};
 let visitorId;try{visitorId=localStorage.getItem('sweetfrog-visitor-id');if(!/^[a-f0-9]{32}$/.test(visitorId||'')){visitorId=Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,'0')).join('');localStorage.setItem('sweetfrog-visitor-id',visitorId);}}catch{visitorId=Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,'0')).join('');}
 let selected='tap',user=null,queue=null,queueTimer=0,countsTimer=0,successTimer=0,routeId=0,queueVersion=0,requesting=false,latestCounts=null,shownRoom='';
 let onlineTimer=0,onlineRouteId=0,onlineRefreshId=0;
@@ -50,7 +50,7 @@ function showSearching(){
   if(wasHidden)requestAnimationFrame(()=>panel.scrollIntoView({block:'center',behavior:'instant'}));
 }
 function showIdle(){
-  content.querySelector('#match-searching').hidden=true;content.querySelector('#match-modes').hidden=false;content.querySelector('#match-start').hidden=!user;
+  content.querySelector('#match-searching').hidden=true;content.querySelector('#match-modes').hidden=false;content.querySelector('#match-start').hidden=false;content.querySelector('#match-start').disabled=!user;
   page.querySelector('#match-found').hidden=true;choose(selected);
 }
 async function handleQueue(next,id=routeId,version=queueVersion){
@@ -88,7 +88,7 @@ async function pollQueue(){
   finally{polling=false;}
 }
 async function start(){
-  if(!user||requesting||queue)return;requesting=true;const id=routeId,version=++queueVersion;const button=content.querySelector('#match-start');button.disabled=true;setMessage('正在加入匹配…');
+  if(!user){setMessage('暂时无法创建游客身份，请刷新页面重试。');return;}if(requesting||queue)return;requesting=true;const id=routeId,version=++queueVersion;const button=content.querySelector('#match-start');button.disabled=true;setMessage('正在加入匹配…');
   try{await handleQueue((await api('match/queue',{method:'POST',body:{game:selected}})).queue,id,version);if(id===routeId&&version===queueVersion)setMessage('');}
   catch(error){setMessage(error.message);}finally{requesting=false;button.disabled=false;}
 }
@@ -100,7 +100,7 @@ async function cancel(){
 }
 function render(){
   content.replaceChildren();
-  const head=make('div','club-heading');head.innerHTML='<span class="eyebrow">QUICK MATCH</span><h1>快速匹配</h1><p>选一款游戏，找到同场对手。30 秒见分晓。</p>';
+  const head=make('div','club-heading');head.innerHTML='<span class="eyebrow">QUICK MATCH</span><h1>快速匹配</h1><p>选一款游戏，找到同场对手。游客也能直接开局；登录后可登上排行榜。</p>';
   const stats=make('div','match-summary');stats.innerHTML=`<span class="match-summary-icon">${iconSvg('people')}</span><span>大厅在线 <strong id="match-total">—</strong> 人</span><small>约 1 分钟内活跃</small><a class="match-online-link" href="#online">看看谁在线 →</a>`;
   const modes=make('div','match-modes');modes.id='match-modes';
   for(const [game,name] of Object.entries(names)){
@@ -116,7 +116,7 @@ function render(){
   const startButton=make('button','pk-main-button match-start');startButton.id='match-start';startButton.type='button';startButton.addEventListener('click',start);
   const message=make('p','match-message','');message.id='match-message';message.setAttribute('role','status');
   content.append(head,stats,modes,startButton,searching,found,message);
-  if(!user){startButton.hidden=true;const gate=make('p','match-login','匹配对战需要玩家账号。');const link=make('a','','登录 / 注册 →');link.href='#account';link.addEventListener('click',()=>window.dispatchEvent(new CustomEvent('sweetfrog:login-return',{detail:'match'})));gate.append(link);content.insertBefore(gate,startButton);}
+  if(!user){startButton.disabled=true;message.textContent='暂时无法创建游客身份，请刷新页面重试。';}
   choose(selected);if(latestCounts)updateCounts(latestCounts);
 }
 async function route(){
@@ -128,7 +128,10 @@ async function route(){
   }
   page.hidden=false;nav.classList.add('active');document.querySelector('#lobby').hidden=true;document.querySelector('#game-screen').hidden=true;document.querySelector('#club-page').hidden=true;
   content.replaceChildren(make('p','club-notice','正在打开匹配大厅…'));
-  try{user=(await api('session')).user;}catch{user=null;}
+  try{
+    user=(await api('session')).user;
+    if(!user){const guest=await api('guest/session',{method:'POST'});user=guest.user;localStorage.setItem('sweetfrog-guest-session',guest.token);localStorage.removeItem('sweetfrog-session');}
+  }catch{user=null;}
   if(id!==routeId)return;
   render();await presence();
   if(user){try{const data=await api('match/queue');if(id===routeId&&data.queue)await handleQueue(data.queue);}catch(error){setMessage(error.message);}}

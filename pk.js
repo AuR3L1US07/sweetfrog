@@ -23,7 +23,7 @@ let viewCode = '', errorMessage = '';
 let pkLaunched=false,pkResultShown=false,scoreSeq=0,latestScore=null,scoreTimer=0,scoreSending=false,pendingScores=0;
 let resultAnnouncedRound=0,focusedRound=0,rematchBusy=false;
 let inviteListAt=0;
-const token = () => { try { return localStorage.getItem('sweetfrog-session') || ''; } catch { return ''; } };
+const token = () => { try { return localStorage.getItem('sweetfrog-session') || localStorage.getItem('sweetfrog-guest-session') || ''; } catch { return ''; } };
 const now = () => Date.now() - clockOffset;
 
 async function api(path, options={}) {
@@ -52,7 +52,7 @@ function landing() {
   content.replaceChildren();
   const head=make('div','club-heading');head.innerHTML='<span class="eyebrow">FRIEND VS FRIEND</span><h1>好友 PK</h1><p>选五款游戏中的一款，开房叫上朋友。30 秒同场比拼。</p>';
   content.append(head);
-  if(!me){loginGate();return;}
+  if(!me||me.role==='guest'){loginGate();return;}
   const grid=make('div','pk-entry-grid');
   const create=make('section','pk-entry-card');const createIcon=make('span','pk-entry-icon');createIcon.innerHTML=iconSvg('add');create.append(createIcon,make('h2','','我来开房'),make('p','','先选游戏，再把房间链接发给朋友。'));
   const choice=make('fieldset','pk-game-choice');choice.append(make('legend','','选择对战游戏'));
