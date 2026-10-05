@@ -93,10 +93,10 @@ export async function handleApi(request, env) {
     }
     async function onlinePlayers(){
       const cutoff=Date.now()-70000;
-      const guests=(await first('SELECT count(*) AS n FROM online_presence WHERE last_seen>=? AND user_id IS NULL',cutoff)).n;
+      const guests=(await first("SELECT count(*) AS n FROM online_presence p LEFT JOIN users u ON u.id=p.user_id WHERE p.last_seen>=? AND (p.user_id IS NULL OR u.role='guest')",cutoff)).n;
       const registered=(await first("SELECT count(*) AS n FROM online_presence p JOIN users u ON u.id=p.user_id WHERE p.last_seen>=? AND u.banned=0 AND u.role<>'guest'",cutoff)).n;
-      const players=await all("SELECT u.id,u.public_id AS publicId,u.username,p.game FROM online_presence p JOIN users u ON u.id=p.user_id WHERE p.last_seen>=? AND u.banned=0 AND u.role<>'guest' ORDER BY p.last_seen DESC,u.id LIMIT 100",cutoff);
-      return {total:guests+registered,guests,registered,players,remaining:Math.max(0,registered-players.length)};
+      const players=await all("SELECT u.id,u.public_id AS publicId,u.username,u.role,p.game FROM online_presence p JOIN users u ON u.id=p.user_id WHERE p.last_seen>=? AND u.banned=0 ORDER BY p.last_seen DESC,u.id LIMIT 100",cutoff);
+      return {total:guests+registered,guests,registered,players,remaining:Math.max(0,guests+registered-players.length)};
     }
     async function queueState(){
       const row=await first('SELECT game,status,room_code FROM match_queue WHERE user_id=?',user.id);
@@ -133,10 +133,10 @@ export async function handleApi(request, env) {
     if(path==='/api/presence'&&method==='POST'){
       const data=await body(request),visitorId=data.visitorId,game=data.game||null;
       if(!/^[a-f0-9]{32}$/.test(visitorId)||game!==null&&!matchGames.includes(game))fail(400,'在线状态无效');
-      const member=user&&user.role!=='guest',key=member?`u:${user.id}`:`g:${visitorId}`,now=Date.now();
+      const member=user&&user.role!=='guest',key=user?`u:${user.id}`:`g:${visitorId}`,now=Date.now();
       await run('DELETE FROM online_presence WHERE last_seen<?',now-86400000);
-      if(member)await run('DELETE FROM online_presence WHERE client_key=?',`g:${visitorId}`);
-      await run('INSERT INTO online_presence(client_key,user_id,game,last_seen) VALUES(?,?,?,?) ON CONFLICT(client_key) DO UPDATE SET game=excluded.game,last_seen=excluded.last_seen',key,member?user.id:null,game,now);
+      if(user)await run('DELETE FROM online_presence WHERE client_key=?',`g:${visitorId}`);
+      await run('INSERT INTO online_presence(client_key,user_id,game,last_seen) VALUES(?,?,?,?) ON CONFLICT(client_key) DO UPDATE SET game=excluded.game,last_seen=excluded.last_seen',key,user?.id||null,game,now);
       return json(await presenceState());
     }
     const friendPair=otherId=>[Math.min(user.id,otherId),Math.max(user.id,otherId)];
@@ -237,7 +237,7 @@ export async function handleApi(request, env) {
     if(path==='/api/guest/session'&&method==='POST'){
       if(user?.role==='guest')return json({token,user});
       if(user)fail(409,'你已经登录玩家账号');
-      await rate(`guest-session:${request.headers.get('CF-Connecting-IP')||'local'}`,30);
+      await rate(`guest-session:${request.headers.get('CF-Connecting-IP')||'local'}`,120);
       const expired="SELECT id FROM users WHERE role='guest' AND created_at<datetime('now','-3 days')";
       await run(`DELETE FROM pk_rooms WHERE host_id IN (${expired}) OR guest_id IN (${expired})`);
       await run(`DELETE FROM match_queue WHERE user_id IN (${expired})`);
@@ -283,9 +283,9 @@ export async function handleApi(request, env) {
     if (method === 'GET' && path === '/api/session') return json({ user });
     const avatarPath=/^\/api\/avatars\/(\d+)$/.exec(path);
     if (method==='GET' && avatarPath) {
-      const account=await first('SELECT avatar_data FROM users WHERE id=?',Number(avatarPath[1]));
+      const account=await first('SELECT avatar_data,role FROM users WHERE id=?',Number(avatarPath[1]));
       if(!account)fail(404,'玩家不存在');
-      if(!account.avatar_data)return Response.redirect(new URL('/assets/default-frog-avatar.svg',request.url),302);
+      if(!account.avatar_data)return Response.redirect(new URL(account.role==='guest'?'/assets/guest-frog-avatar.svg':'/assets/default-frog-avatar.svg',request.url),302);
       const match=/^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(account.avatar_data);
       if(!match)fail(500,'头像暂时无法读取');
       const bytes=Uint8Array.from(atob(match[2]),char=>char.charCodeAt(0));

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-labelledby="title">
+  <title id="title">游客青蛙头像</title>
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#ece5ff"/><stop offset="1" stop-color="#cfecf6"/></linearGradient>
+    <linearGradient id="skin" x2="0" y2="1"><stop stop-color="#bce8b0"/><stop offset="1" stop-color="#78cba1"/></linearGradient>
+  </defs>
+  <rect width="160" height="160" rx="36" fill="url(#bg)"/>
+  <circle cx="80" cy="83" r="63" fill="#fff" opacity=".42"/>
+  <path d="M27 154c7-28 23-42 53-42s46 14 53 42" fill="#8b7bc3"/>
+  <path d="M45 132c4-18 16-28 35-28s31 10 35 28" fill="#c8b8ee"/>
+  <ellipse cx="80" cy="83" rx="49" ry="42" fill="url(#skin)" stroke="#66ad8d" stroke-width="3"/>
+  <circle cx="50" cy="51" r="18" fill="#a8db9e" stroke="#66ad8d" stroke-width="3"/>
+  <circle cx="110" cy="51" r="18" fill="#a8db9e" stroke="#66ad8d" stroke-width="3"/>
+  <ellipse cx="54" cy="53" rx="7" ry="9" fill="#274d45"/>
+  <ellipse cx="106" cy="53" rx="7" ry="9" fill="#274d45"/>
+  <circle cx="56" cy="50" r="2.5" fill="white"/><circle cx="108" cy="50" r="2.5" fill="white"/>
+  <circle cx="72" cy="76" r="2" fill="#509376"/><circle cx="88" cy="76" r="2" fill="#509376"/>
+  <path d="M63 89q17 15 34 0" fill="none" stroke="#3b7863" stroke-width="4" stroke-linecap="round"/>
+  <path d="M41 37q39-30 78 0" fill="none" stroke="#b39adf" stroke-width="9" stroke-linecap="round"/>
+  <path d="M50 20q30-13 60 0" fill="none" stroke="#d6c4f0" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="126" cy="29" r="12" fill="#fff" opacity=".92"/><path d="M122 26q4-4 8 0t-4 6" fill="none" stroke="#8b7bc3" stroke-width="2.5" stroke-linecap="round"/><circle cx="126" cy="35" r="1.5" fill="#8b7bc3"/>
+</svg>

@@ -17,7 +17,8 @@ const paths={
   settings:'<path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2" fill="var(--nav-knob,#fff)"/><circle cx="15" cy="12" r="2" fill="var(--nav-knob,#fff)"/><circle cx="10" cy="18" r="2" fill="var(--nav-knob,#fff)"/>',
   menu:'<path d="M4 7h16M4 12h16M4 17h16"/>',
   close:'<path d="M5 5 19 19M19 5 5 19"/>',
-  user:'<circle cx="12" cy="8" r="3.5"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/>'
+  user:'<circle cx="12" cy="8" r="3.5"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/>',
+  logout:'<path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4M14 8l4 4-4 4M9 12h9"/>'
 };
 export function iconSvg(name){return `<svg class="sf-icon sf-icon-${name}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${paths[name]||paths.sparkle}</svg>`;}
 export function hydrateIcons(root=document){root.querySelectorAll('[data-icon]').forEach(node=>{node.innerHTML=iconSvg(node.dataset.icon);});}

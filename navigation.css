@@ -4,3 +4,22 @@
 @media(prefers-reduced-motion:reduce){.site-header nav{transition:none}}
 .nav-menu-toggle{position:relative}.nav-menu-badge{position:absolute;top:-7px;right:-7px;display:grid;place-items:center;min-width:19px;height:19px;padding:0 4px;border-radius:20px;background:#e98274;color:white;font-size:10px;font-weight:900}.nav-menu-badge[hidden]{display:none}
 @media(max-width:1100px){.site-header:not(.nav-open) nav{display:none}.site-header.nav-open nav{transform:none;animation:nav-drawer-in .24s ease both}}@keyframes nav-drawer-in{from{transform:translateX(105%)}to{transform:translateX(0)}}
+.site-header nav>a:not(.account-chip),.site-header nav .quiet-button{transition:transform .18s ease,background-color .18s ease,box-shadow .18s ease,color .18s ease}
+.site-header nav>a:not(.account-chip):hover,.site-header nav .quiet-button:hover{transform:translateY(-3px);background:#e0f5e9;box-shadow:0 8px 18px #327d6c24}
+.site-header nav>a:not(.account-chip):active,.site-header nav .quiet-button:active{transform:translateY(0) scale(.97)}
+.site-header nav>a:not(.account-chip):hover .sf-icon,.site-header nav .quiet-button:hover .sf-icon{transform:rotate(-9deg) scale(1.13)}
+.site-header nav .sf-icon{transition:transform .18s ease}
+.account-menu{position:relative;flex:none;margin-left:13px}
+.site-header .account-menu .account-chip{margin-left:0;transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease}
+.account-menu:hover .account-chip,.account-menu:focus-within .account-chip,.account-menu.open .account-chip{transform:translateY(-2px);border-color:#8dcaaa;box-shadow:0 9px 22px #267b5b2b,inset 0 1px #fff}
+.account-popover{position:absolute;z-index:40;top:calc(100% + 10px);right:0;min-width:184px;padding:8px;border:1px solid #d0e7da;border-radius:17px;background:linear-gradient(140deg,#fffffff7,#eaf7f2f7);box-shadow:0 16px 36px #245e4a32;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+.account-popover:before{content:"";position:absolute;left:0;right:0;top:-12px;height:12px}
+.account-menu:not(:hover):not(:focus-within):not(.open) .account-popover{visibility:hidden;opacity:0;pointer-events:none;transform:translateY(-5px)}
+.account-popover>a,.account-popover>button{display:flex;align-items:center;gap:10px;width:100%;min-height:42px;padding:10px;border:0;border-radius:11px;background:transparent;color:#2e6652;font:850 12px "Sweet Nunito","Sweet Round",sans-serif;text-align:left;white-space:nowrap;cursor:pointer}
+.account-popover>a:hover,.account-popover>button:hover,.account-popover>a:focus-visible,.account-popover>button:focus-visible{background:#dff3e8;color:#176e58}
+.account-popover .sf-icon{width:18px;height:18px;flex:none}
+.account-popover>button{border-top:1px solid #dcece3;border-radius:0 0 11px 11px;color:#8c534d}
+.account-popover>button:hover{background:#fff0eb;color:#9e3d35}
+@media(max-width:1100px){.account-menu{margin-left:0}.site-header .account-menu .account-chip{margin:0}}
+@media(hover:none){.account-menu:not(.open) .account-popover{visibility:hidden;opacity:0;pointer-events:none}.account-menu.open .account-popover{visibility:visible;opacity:1;pointer-events:auto}}
+@media(prefers-reduced-motion:reduce){.site-header nav>a:not(.account-chip),.site-header nav .quiet-button,.site-header nav .sf-icon,.site-header .account-menu .account-chip{transition:none}.site-header nav>a:not(.account-chip):hover,.site-header nav .quiet-button:hover,.account-menu:hover .account-chip{transform:none}}

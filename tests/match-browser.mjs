@@ -26,6 +26,12 @@ try{
   await hostPage.goto(base+'/#games');await hostPage.locator('#online-total').waitFor();
   await guestPage.goto(base+'/#games');
   await hostPage.waitForFunction(()=>Number(document.querySelector('#online-total').textContent)>=1);
+  await hostPage.locator('#account-chip').hover();
+  await hostPage.locator('#account-popover').getByRole('button',{name:'退出登录'}).waitFor({state:'visible'});
+  await hostPage.locator('#account-popover').getByRole('link',{name:'个人信息'}).waitFor({state:'visible'});
+  await hostPage.screenshot({path:'tests/account-menu-preview.png'});
+  await hostPage.locator('header nav a[href="#games"]').hover();
+  await hostPage.waitForFunction(()=>getComputedStyle(document.querySelector('header nav a[href="#games"]')).transform!=='none');
   assert.equal(await hostPage.locator('.brand-mark .sf-icon').count(),1);
   assert.equal(await hostPage.locator('header nav a[href="#match"]').count(),1);
   assert.equal(await hostPage.locator('.spark-one .sf-icon').count(),1);
@@ -39,7 +45,15 @@ try{
   await hostPage.screenshot({path:'tests/online-desktop-preview.png',fullPage:true});
   const visitorPage=await browser.newPage();await visitorPage.goto(base+'/#online');
   await visitorPage.waitForFunction(()=>document.querySelector('#online-page-breakdown')?.textContent.includes('游客 1 人'));
-  assert.equal(await visitorPage.locator('.online-player-card').count(),2,'guests can browse without appearing by name');
+  const browsingGuest=await visitorPage.evaluate(()=>localStorage.getItem('sweetfrog-guest-session'));
+  assert.match(browsingGuest,/^[a-f0-9]{64}$/);
+  await visitorPage.waitForFunction(()=>document.querySelectorAll('.online-player-card').length===3);
+  const visitorName=await visitorPage.locator('.online-player-card').filter({hasText:'游客'}).locator('.online-player-detail strong').first().textContent();
+  assert.match(visitorName,/^游客\d{5}/);
+  const guestAvatar=visitorPage.locator('.online-player-card').filter({hasText:visitorName}).locator('img');
+  await visitorPage.waitForFunction(()=>[...document.querySelectorAll('.online-player-avatar')].every(image=>image.complete&&image.naturalWidth>0));
+  assert.match(await guestAvatar.getAttribute('src'),/\/api\/avatars\/\d+/);
+  assert.match(await visitorPage.evaluate(async src=>(await fetch(src)).url,await guestAvatar.getAttribute('src')),/guest-frog-avatar\.svg$/);
   await visitorPage.close();
   await hostPage.getByRole('button',{name:'刷新名单'}).click();
   await hostPage.getByRole('link',{name:'去快速匹配 →'}).click();await hostPage.waitForURL('**/#match');
@@ -81,6 +95,10 @@ try{
   await touristPage.locator('#pk-game').waitFor({state:'visible',timeout:12000});
   assert.equal(await touristPage.locator('.pk-player-name').getByText(tourist.username).count(),1);
   await touristPage.close();
+  await hostPage.locator('#account-chip').hover();
+  await hostPage.locator('#account-popover').getByRole('button',{name:'退出登录'}).click();
+  await hostPage.waitForURL('**/#account');
+  assert.equal(await hostPage.locator('#account-chip').getByText('登录').count(),1);
   assert.deepEqual(errors,[]);
   console.log('PASS: signed-in and guest matchmaking, five-digit guest name, shared PK room and mobile layout');
 }finally{

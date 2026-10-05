@@ -15,13 +15,29 @@ const token=()=>{try{return localStorage.getItem('sweetfrog-session')||localStor
 let visitorId;try{visitorId=localStorage.getItem('sweetfrog-visitor-id');if(!/^[a-f0-9]{32}$/.test(visitorId||'')){visitorId=Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,'0')).join('');localStorage.setItem('sweetfrog-visitor-id',visitorId);}}catch{visitorId=Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,'0')).join('');}
 let selected='tap',user=null,queue=null,queueTimer=0,countsTimer=0,successTimer=0,routeId=0,queueVersion=0,requesting=false,latestCounts=null,shownRoom='';
 let onlineTimer=0,onlineRouteId=0,onlineRefreshId=0;
+let guestSessionPromise=null;
 async function api(path,options={}){
   const response=await fetch('/api/'+path,{method:options.method||'GET',headers:{'Content-Type':'application/json',...(token()?{Authorization:`Bearer ${token()}`}:{})},body:options.body===undefined?undefined:JSON.stringify(options.body)});
   const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(data.error||'连接失败，请稍后重试');return data;
 }
+async function ensureGuestSession(){
+  if(localStorage.getItem('sweetfrog-session')){
+    if((await api('session')).user)return;
+    localStorage.removeItem('sweetfrog-session');
+  }
+  if(guestSessionPromise)return guestSessionPromise;
+  guestSessionPromise=(async()=>{
+    const existing=localStorage.getItem('sweetfrog-guest-session');
+    if(existing&&(await api('session')).user)return;
+    localStorage.removeItem('sweetfrog-guest-session');
+    const guest=await api('guest/session',{method:'POST'});
+    localStorage.setItem('sweetfrog-guest-session',guest.token);
+  })();
+  try{await guestSessionPromise;}finally{guestSessionPromise=null;}
+}
 async function presence(){
   if(document.hidden)return;
-  try{const data=await api('presence',{method:'POST',body:{visitorId,game:page.hidden?null:selected}});updateCounts(data);}catch{}
+  try{await ensureGuestSession();const data=await api('presence',{method:'POST',body:{visitorId,game:page.hidden?null:selected}});updateCounts(data);}catch{}
 }
 function updateCounts(data){
   latestCounts=data;const total=document.querySelector('#online-total');if(total)total.textContent=String(data.total);
@@ -129,8 +145,8 @@ async function route(){
   page.hidden=false;nav.classList.add('active');document.querySelector('#lobby').hidden=true;document.querySelector('#game-screen').hidden=true;document.querySelector('#club-page').hidden=true;
   content.replaceChildren(make('p','club-notice','正在打开匹配大厅…'));
   try{
+    await ensureGuestSession();
     user=(await api('session')).user;
-    if(!user){const guest=await api('guest/session',{method:'POST'});user=guest.user;localStorage.setItem('sweetfrog-guest-session',guest.token);localStorage.removeItem('sweetfrog-session');}
   }catch{user=null;}
   if(id!==routeId)return;
   render();await presence();
@@ -142,9 +158,9 @@ function renderOnlineShell(){
   onlineContent.replaceChildren();
   const head=make('div','club-heading');head.innerHTML='<span class="eyebrow">WHO IS HERE</span><h1>在线玩家</h1><p>看看此刻谁也在青蛙游戏厅。</p>';
   const summary=make('section','online-summary');summary.innerHTML=`<span class="online-summary-icon">${iconSvg('people')}</span><div><strong id="online-page-total">—</strong><span>人在线</span><p id="online-page-breakdown">正在读取…</p></div><a href="#match">去快速匹配 →</a>`;
-  const title=make('div','online-list-heading');title.append(make('h2','','已登录的玩家'));
+  const title=make('div','online-list-heading');title.append(make('h2','','正在这里的玩家'));
   const refresh=make('button','online-refresh','刷新名单');refresh.type='button';refresh.addEventListener('click',()=>refreshOnline());title.append(refresh);
-  const note=make('p','online-note','最近约 1 分钟有活动的玩家会显示在这里；游客仅计入人数。');
+  const note=make('p','online-note','显示最近约 1 分钟有活动的玩家；游客使用临时昵称和专属头像。');
   const list=make('div','online-player-list');list.id='online-player-list';list.setAttribute('aria-live','polite');
   const status=make('p','online-status','正在加载在线名单…');status.id='online-status';status.setAttribute('role','status');
   onlineContent.append(head,summary,title,note,list,status);
@@ -153,13 +169,13 @@ function showOnlinePlayers(data){
   onlineContent.querySelector('#online-page-total').textContent=String(data.total);
   onlineContent.querySelector('#online-page-breakdown').textContent=`已登录 ${data.registered} 人 · 游客 ${data.guests} 人`;
   const list=onlineContent.querySelector('#online-player-list');list.replaceChildren();
-  if(!data.players.length){list.append(make('p','online-empty','暂时没有登录玩家在线。'));return;}
+  if(!data.players.length){list.append(make('p','online-empty','暂时没有玩家在线。'));return;}
   const ownId=user?.id;
   for(const player of data.players){
     const card=make('article','online-player-card');
-    const avatar=make('img','online-player-avatar');avatar.src=`/api/avatars/${player.id}`;avatar.alt='';avatar.loading='lazy';avatar.onerror=()=>{avatar.onerror=null;avatar.src='./assets/default-frog-avatar.svg';};
+    const avatar=make('img','online-player-avatar');avatar.src=`/api/avatars/${player.id}`;avatar.alt='';avatar.loading='lazy';avatar.onerror=()=>{avatar.onerror=null;avatar.src=player.role==='guest'?'./assets/guest-frog-avatar.svg':'./assets/default-frog-avatar.svg';};
     const detail=make('div','online-player-detail');detail.append(make('strong','',player.username+(player.id===ownId?' · 你':'')),make('span','',player.game&&names[player.game]?`正在看「${names[player.game]}」匹配`:'在游戏厅里'));
-    const badge=make('span','online-player-badge','在线');card.append(avatar,detail,badge);list.append(card);
+    const badge=make('span','online-player-badge',player.role==='guest'?'游客':'在线');card.append(avatar,detail,badge);list.append(card);
   }
   if(data.remaining)list.append(make('p','online-more',`还有 ${data.remaining} 位玩家在线`));
 }

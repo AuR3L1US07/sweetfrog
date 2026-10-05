@@ -105,7 +105,9 @@ try {
   assert.equal((await call('/api/pk/rooms','POST',{game:'tap'},temporary.token))[0],401);
   assert.equal((await call('/api/admin/overview','GET',undefined,admin.token))[1].users,2);
   await call('/api/presence','POST',{visitorId:'00112233445566778899aabbccddeeff',game:'tap'},temporary.token);
-  assert.equal((await call('/api/presence/players'))[1].players.some(item=>item.username===temporary.user.username),false);
+  const withGuest=(await call('/api/presence/players'))[1];
+  assert.equal(withGuest.guests,2);
+  assert.equal(withGuest.players.find(item=>item.username===temporary.user.username)?.role,'guest');
   assert.equal((await call('/api/match/queue','POST',{game:'tap'},temporary.token))[1].queue.status,'waiting');
   const mixed=(await call('/api/match/queue','POST',{game:'tap'},token))[1].queue;
   assert.equal(mixed.status,'matched');

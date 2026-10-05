@@ -1,7 +1,26 @@
 import { iconSvg } from './icons.js';
 
 const header=document.querySelector('.site-header'),nav=header.querySelector('nav'),account=document.querySelector('#account-chip');
-header.append(account);nav.id='site-navigation';
+const accountMenu=document.createElement('div');accountMenu.className='account-menu';
+const accountPopover=document.createElement('div');accountPopover.className='account-popover';accountPopover.id='account-popover';accountPopover.hidden=true;
+accountPopover.setAttribute('role','group');accountPopover.setAttribute('aria-label','账号操作');
+const profileLink=document.createElement('a');profileLink.href='#profile';profileLink.innerHTML=iconSvg('user')+'<span>个人信息</span>';
+const adminLink=document.createElement('a');adminLink.href='./admin.html';adminLink.className='account-admin-link';adminLink.innerHTML=iconSvg('settings')+'<span>管理后台</span>';adminLink.hidden=true;
+const logout=document.createElement('button');logout.type='button';logout.innerHTML=iconSvg('logout')+'<span>退出登录</span>';
+accountPopover.append(profileLink,adminLink,logout);accountMenu.append(account,accountPopover);header.append(accountMenu);nav.id='site-navigation';
+accountPopover.hidden=!account.classList.contains('signed-in');adminLink.hidden=!document.querySelector('#admin-nav-link');
+function closeAccountMenu(){accountMenu.classList.remove('open');account.setAttribute('aria-expanded','false');}
+account.setAttribute('aria-expanded','false');account.setAttribute('aria-controls','account-popover');
+account.addEventListener('click',event=>{if(accountPopover.hidden)return;if(matchMedia('(hover: none)').matches){event.preventDefault();const open=!accountMenu.classList.contains('open');accountMenu.classList.toggle('open',open);account.setAttribute('aria-expanded',String(open));}});
+accountMenu.addEventListener('mouseenter',()=>{if(!accountPopover.hidden)account.setAttribute('aria-expanded','true');});
+accountMenu.addEventListener('mouseleave',closeAccountMenu);
+accountMenu.addEventListener('focusin',()=>{if(!accountPopover.hidden)account.setAttribute('aria-expanded','true');});
+accountMenu.addEventListener('focusout',event=>{if(!accountMenu.contains(event.relatedTarget))closeAccountMenu();});
+profileLink.addEventListener('click',closeAccountMenu);adminLink.addEventListener('click',closeAccountMenu);
+logout.addEventListener('click',()=>{closeAccountMenu();window.dispatchEvent(new Event('sweetfrog:logout'));});
+document.addEventListener('click',event=>{if(!accountMenu.contains(event.target))closeAccountMenu();});
+window.addEventListener('keydown',event=>{if(event.key==='Escape'&&accountMenu.classList.contains('open')){closeAccountMenu();account.focus();}});
+window.addEventListener('hashchange',closeAccountMenu);
 const menu=document.createElement('button');menu.type='button';menu.id='nav-menu-toggle';menu.className='nav-menu-toggle';menu.setAttribute('aria-controls','site-navigation');menu.setAttribute('aria-expanded','false');menu.setAttribute('aria-label','展开功能菜单');header.append(menu);
 function syncMenuBadge(){const source=nav.querySelector('#friends-badge'),target=menu.querySelector('.nav-menu-badge');if(!target)return;target.hidden=!source||source.hidden;target.textContent=source?.textContent||'';}
 function renderMenu(open){menu.innerHTML=iconSvg(open?'close':'menu')+'<span>菜单</span><small class="nav-menu-badge" hidden></small>';syncMenuBadge();}
